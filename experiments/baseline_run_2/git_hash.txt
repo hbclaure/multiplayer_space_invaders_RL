@@ -1,0 +1,3 @@
+branch: main
+commit: 34470c4ff291c49e72af26efe288da9a0049405c
+unstaged changes in files: ['agents/nao_policy.py', 'agents/support_policies.py', 'consts.py', 'env/competitive_env.py', 'utils.py']

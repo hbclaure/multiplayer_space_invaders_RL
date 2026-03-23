@@ -16,13 +16,23 @@ from utils import init_experiment_dir, create_env, register_env
 from env_utils import boolean_policy_to_index
 from consts import DynamicsConsts, ObservationConsts, RewardTypes, GameTypes, RenderModes, HumanPolicies, NaoSupportPolicies, ActionSpaces, MinimalComplexityHumanPolicies
 from agents.policies import human_rules_based_policy_from_obs, create_exploration_policy_fn
-
 #by running: python train_new.py --timesteps 100 --exp-name baseline_run_2 --support-policy biasedSupportLeft you are training the human 
+
 # TO DO: Need to add render mode as an adjustable parameter when you want to save frames (rgb_array)
 
 # TODO: bundle arguments into a function importable, and add a function to fill in missing arguments with defaults
     # currently, any loading/analysis code that uses new arguments will fail when those arguments aren't present in older experiments
+#  currently usable support policies:
 
+# humanOnly
+# shutterOnly
+# equalizeScores
+# equalizeHistory
+# equalizeHistoryEven
+# idleSupport
+# equalizeScoresNeutral
+# biasedSupportLeft
+# biasedSupportRight
 def linear_schedule(initial_value: float):
     """
     Define a linear learning rate scheduler

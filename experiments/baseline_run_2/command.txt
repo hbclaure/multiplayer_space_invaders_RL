@@ -1,0 +1,1 @@
+python train_new.py --timesteps 100 --exp-name baseline_run_2 --support-policy biasedSupportLeft

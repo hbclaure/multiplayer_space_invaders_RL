@@ -17,11 +17,11 @@ class BaseSupportPolicy():
     def update_support(self, state: 'SpaceInvadersState'):
         raise NotImplementedError
 
-    def describe_policy_agnostic_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
-        return f"I'm going to support {support_player.value}."
+    # def describe_policy_agnostic_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
+    #     return f"I'm going to support {support_player.value}."
     
-    def describe_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
-        raise NotImplementedError("This method should be implemented in a subclass.")
+    # def describe_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
+    #     raise NotImplementedError("This method should be implemented in a subclass.")
     
     @classmethod
     def get_policy_mapping(cls):
@@ -423,14 +423,14 @@ class BiasedSupportPolicy(BaseSupportPolicy):
             self.support_player = self.shuffled_intervals[self.current_interval_index]["player"]
             self.current_interval_start_frame = frame
 
-    def describe_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
-        """
-        Describe the reason for the support change.
-        """
-        if support_player == self.favored_player:
-            return f"To give extra support to {self.favored_player.value}, I'm going to help them now."
-        else:
-            return f"To give some support to {self.unfavored_player.value}, I'm going to help them now."
+    # def describe_support_change(self, previous_support_player: Players, support_player: Players, state: 'SpaceInvadersState') -> str:
+    #     """
+    #     Describe the reason for the support change.
+    #     """
+    #     if support_player == self.favored_player:
+    #         return f"To give extra support to {self.favored_player.value}, I'm going to help them now."
+    #     else:
+    #         return f"To give some support to {self.unfavored_player.value}, I'm going to help them now."
 
     @classmethod
     def describe_policy(cls) -> str:
@@ -443,9 +443,9 @@ class BiasedSupportPolicyLeft(BiasedSupportPolicy):
     def __init__(self):
         super().__init__(favored_player=Players.HUMAN)
 
-    @classmethod
-    def describe_policy(cls) -> str:
-        return f"For this game, I will support {Players.HUMAN.value} more than {Players.SHUTTER.value}."
+    # @classmethod
+    # def describe_policy(cls) -> str:
+    #     return f"For this game, I will support {Players.HUMAN.value} more than {Players.SHUTTER.value}."
     
 class BiasedSupportPolicyRight(BiasedSupportPolicy):
     """

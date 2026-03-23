@@ -118,23 +118,25 @@ class NaoPolicy:
         agent_powerup = {"Shutter": False, "Human": False}
         offset = .005
 
-        # TODO: call nao speech command instead of printing to console
-        requested_robot_action = None
-        if previous_support_player != support_player or state.time_state.frame == 0:
-            POLICY_BASED_SUPPORT_DESCRIPTIONS = True
-            if POLICY_BASED_SUPPORT_DESCRIPTIONS:
-                description = self.support_policy.describe_support_change(previous_support_player, support_player, state)
-                #print(f"Support changed from {previous_support_player} to {support_player}. {description}")
-            else:
-                description = self.support_policy.describe_policy_agnostic_support_change(previous_support_player, support_player, state)
-            print(f"Support changed from {previous_support_player} to {support_player}. Description: {description}")
+        # #FOR ROBOT
+
+        # # TODO: call nao speech command instead of printing to console
+        # requested_robot_action = None
+        # if previous_support_player != support_player or state.time_state.frame == 0:
+        #     POLICY_BASED_SUPPORT_DESCRIPTIONS = True
+        #     if POLICY_BASED_SUPPORT_DESCRIPTIONS:
+        #         description = self.support_policy.describe_support_change(previous_support_player, support_player, state)
+        #         #print(f"Support changed from {previous_support_player} to {support_player}. {description}")
+        #     else:
+        #         description = self.support_policy.describe_policy_agnostic_support_change(previous_support_player, support_player, state)
+        #     print(f"Support changed from {previous_support_player} to {support_player}. Description: {description}")
             
-            description_remapped = BaseSupportPolicy.remap_player_names(description)
+        #     description_remapped = BaseSupportPolicy.remap_player_names(description)
             
-            requested_robot_action = RobotActionRequest(
-                    type=RobotActionType.SPEECH,
-                    params={"message": description_remapped}
-            )
+        #     requested_robot_action = RobotActionRequest(
+        #             type=RobotActionType.SPEECH,
+        #             params={"message": description_remapped}
+        #     )
 
         if support_player == Players.NAO: 
             if nao_x > .5 + offset:
@@ -145,7 +147,7 @@ class NaoPolicy:
                 left = right = shoot = False
 
             nearest_enemy = state.get_nearest_enemy(player=Players.NAO)
-            return left, right, shoot, nearest_enemy, support_player, agent_powerup, requested_robot_action
+            return left, right, shoot, nearest_enemy, support_player, agent_powerup#, requested_robot_action
 
         if self.mode == 'powerUp':  
             nao_y = state.players_state.nao_position_y
@@ -206,7 +208,7 @@ class NaoPolicy:
                 excluded_enemies=[]
             )
 
-            return left, right, shoot, nearest_enemy, support_player, agent_powerup, requested_robot_action
+            return left, right, shoot, nearest_enemy, support_player, agent_powerup#, requested_robot_action
 
         elif self.mode == 'shooting':
             left = False
@@ -258,7 +260,7 @@ class NaoPolicy:
                     right = True
                 elif nao_position_x > target_position_x + margin:
                     left = True
-                return left, right, shoot, nearest_enemy, support_player, agent_powerup, requested_robot_action
+                return left, right, shoot, nearest_enemy, support_player, agent_powerup#, requested_robot_action
 
             # current_time_ms = time.time() * 1000
             # if current_time_ms - last_shot_time['Nao'] < player_avg_frequency * self.nao_relative_speed:
@@ -305,7 +307,7 @@ class NaoPolicy:
                         left = True
                     elif nearest_bullet[0] <= nao_position_x:
                         right = True
-            return left, right, shoot, nearest_enemy, support_player, agent_powerup, requested_robot_action
+            return left, right, shoot, nearest_enemy, support_player, agent_powerup#, requested_robot_action
 
         else:
             raise ValueError(f"Mode: {self.mode} is not supported.")

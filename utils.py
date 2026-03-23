@@ -15,7 +15,7 @@ import importlib
 from enum import Enum
 from agents.policies import Action
 from agents.robot_integration import RobotActionRequest
-from typing import List
+from typing import List, Optional
 #from interactive_gameplay.utils import GameScriptEvent # NOTE: moved to inside CustomJSONDecoder to avoid circular import
 
 ### Debugging utilities
@@ -232,7 +232,7 @@ def create_env(
     renderFrameNumber=True,
     use_observations=True,
     interactive_mode=InteractiveModes.NONE,
-    interactive_players=[Players.HUMAN, Players.SHUTTER], # Only used if interactive_mode is not NONE
+    interactive_players: Optional[List[Players]]=None, # Only used if interactive_mode is not NONE
     num_game_segments=1,
     game_duration_frames=DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
     independent_victory_score_threshold=None,
@@ -240,6 +240,12 @@ def create_env(
 ):    
     if not is_env_registered(env_id):
         raise ValueError(f"Environment {env_id} not registered. Use register_env() to register the environment.")
+
+    if interactive_players is None:
+        if interactive_mode == InteractiveModes.NONE:
+            interactive_players = []
+        else:
+            interactive_players = [Players.HUMAN, Players.SHUTTER]
     
     if multiprocessing:
         env = make_vec_env(

@@ -549,13 +549,14 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             left_shutter, right_shutter, shoot_shutter = False, False, False
         else:
             # Run Nao policy and update support decision
-            left, right, shoot, nearest_enemy_nao, nao_supporting_player, agent_powerup, requested_robot_action = self.nao_policy_instance.nao_policy(
+            left, right, shoot, nearest_enemy_nao, nao_supporting_player, agent_powerup,  = self.nao_policy_instance.nao_policy(
                 state=self.state, images=self.rendered_objects
-            )
+            ) #removed requested_robot_action
             
             if self.config.game_type == GameTypes.COMPETITIVE:
                 # Only communicate nao's policy if the game is competitive and not tutorial
-                self.step_info.requested_robot_action = requested_robot_action
+                #self.step_info.requested_robot_action = requested_robot_action
+                pass
             if nao_supporting_player == Players.HUMAN:
                 self.state.history.support_frame_count[Players.HUMAN] +=1 #add to the frame count if support Human
             elif nao_supporting_player == Players.SHUTTER:
