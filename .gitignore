@@ -1,5 +1,7 @@
 venv/
 venv_fairness/
 __pycache__/
-*.pycvenv/
+*.pyc
+
+# Virtualenv used for experiments
 venv_fairness/
