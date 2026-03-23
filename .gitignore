@@ -1,4 +1,5 @@
 venv/
 venv_fairness/
 __pycache__/
-*.pyc
+*.pycvenv/
+venv_fairness/
