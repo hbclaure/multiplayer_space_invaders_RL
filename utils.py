@@ -8,7 +8,6 @@ import pygame
 import gymnasium as gym
 from gymnasium.envs.registration import register, registry
 from stable_baselines3.common.env_util import make_vec_env
-import cv2
 import numpy as np
 from consts import GameTypes, ActionSpaces, RewardTypes, RenderModes, NaoSupportPolicies, InteractiveModes, Players, DynamicsConsts, ScoreConsts
 import importlib
@@ -186,6 +185,7 @@ class VideoRecorder:
     def save_video(self, output_path: str):
         if self.video_frames is None:
             raise ValueError("Video frames have not been parsed yet. Call parse_frames() before saving the video.")
+        import cv2
         
         n_frames, height, width, n_channels = self.video_frames.shape
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -237,6 +237,9 @@ def create_env(
     game_duration_frames=DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
     independent_victory_score_threshold=None,
     game_type=GameTypes.COMPETITIVE,
+    disadvantaged_player=None,
+    disadvantaged_idle_prob=0.0,
+    disadvantaged_extra_shot_cooldown_frames=0,
 ):    
     if not is_env_registered(env_id):
         raise ValueError(f"Environment {env_id} not registered. Use register_env() to register the environment.")
@@ -246,6 +249,11 @@ def create_env(
             interactive_players = []
         else:
             interactive_players = [Players.HUMAN, Players.SHUTTER]
+
+    # Training/eval without live rendering should use the off-screen path to avoid
+    # paying for display-window setup.
+    if not render and fixed_framerate is None:
+        render_mode = RenderModes.RGB_ARRAY.value
     
     if multiprocessing:
         env = make_vec_env(
@@ -268,6 +276,9 @@ def create_env(
                 "game_duration_frames": game_duration_frames,
                 "independent_victory_score_threshold": independent_victory_score_threshold,
                 "game_type": game_type,
+                "disadvantaged_player": disadvantaged_player,
+                "disadvantaged_idle_prob": disadvantaged_idle_prob,
+                "disadvantaged_extra_shot_cooldown_frames": disadvantaged_extra_shot_cooldown_frames,
             },
         )
         if render or fixed_framerate is not None:
@@ -293,6 +304,9 @@ def create_env(
             game_duration_frames=game_duration_frames,
             independent_victory_score_threshold=independent_victory_score_threshold,
             game_type=game_type,
+            disadvantaged_player=disadvantaged_player,
+            disadvantaged_idle_prob=disadvantaged_idle_prob,
+            disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
         )
         env = EnvRenderWrapper(env, render=render, framerate=fixed_framerate)
         env.reset()

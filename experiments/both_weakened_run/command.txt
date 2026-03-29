@@ -1,0 +1,1 @@
+python train_new.py --exp-name both_weakened_run --reward-model naoFairness --independent-victory-score-threshold 900 --timesteps 1000000 --disadvantaged-player Human --disadvantaged-idle-prob 0.1 --disadvantaged-extra-shot-cooldown-frames 30 --multiprocessing --num-cpu 2

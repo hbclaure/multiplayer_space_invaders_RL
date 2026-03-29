@@ -311,13 +311,13 @@ def human_rules_based_policy_from_state(state):
     if not state.can_shoot(Players.HUMAN):
         if hit:
             if nearest_bullet[0] >= 1 - (75 / RenderConsts.SCREEN_WIDTH):
-                left = False #True
+                left = True #False #True
             elif nearest_bullet[0] <= 55 / RenderConsts.SCREEN_WIDTH:
-                right = False #True
+                right = True #False #True
             elif nearest_bullet[0] > state.players_state.human_position_x:
-                left = False #True
+                left = True # False #True
             elif nearest_bullet[0] <= state.players_state.human_position_x:
-                right = False #True
+                right = True #False #True
     else:
         # TODO: Why not include this in the can_shoot logic?
         if abs(nearest_enemy[0] - state.players_state.human_position_x) <= DynamicsConsts.SHOOTING_RANGE:
@@ -337,13 +337,13 @@ def human_rules_based_policy_from_state(state):
                 shoot = False
             # TODO: what's 75 and 55?
             if nearest_bullet[0] >= 1 - (75 / RenderConsts.SCREEN_WIDTH):
-                left = False #True
+                left = True
             elif nearest_bullet[0] <= 55 / RenderConsts.SCREEN_WIDTH:
-                right = False #True
+                right = True
             elif nearest_bullet[0] > state.players_state.human_position_x:
-                left = False #True
+                left = True
             elif nearest_bullet[0] <= state.players_state.human_position_x:
-                right = False #True
+                right = True
 
     left, right, shoot = tie_breaker_actions(left, right, shoot)
 

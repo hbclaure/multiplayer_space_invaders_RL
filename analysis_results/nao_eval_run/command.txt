@@ -1,0 +1,1 @@
+python /Users/houstonclaure/Desktop/multiplayer_space_invaders_RL/tests.py --manual-model-experiment-name test_run_three_actions_5M --num-episodes 100 --exp-name nao_eval_run

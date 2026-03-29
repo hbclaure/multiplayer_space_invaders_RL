@@ -6,6 +6,8 @@ import pprint
 import copy
 import numpy as np
 import torch
+from stable_baselines3 import DQN
+from stable_baselines3.common.callbacks import BaseCallback
 
 from gymnasium.envs.registration import register
 
@@ -14,7 +16,7 @@ from deep_sarsa import DeepSarsa
 from path_consts import EXPERIMENTS_DIR
 from utils import init_experiment_dir, create_env, register_env
 from env_utils import boolean_policy_to_index
-from consts import DynamicsConsts, ObservationConsts, RewardTypes, GameTypes, RenderModes, HumanPolicies, NaoSupportPolicies, ActionSpaces, MinimalComplexityHumanPolicies
+from consts import DynamicsConsts, ObservationConsts, RewardTypes, GameTypes, RenderModes, HumanPolicies, NaoSupportPolicies, ActionSpaces, MinimalComplexityHumanPolicies, Players
 from agents.policies import human_rules_based_policy_from_obs, create_exploration_policy_fn
 #by running: python train_new.py --timesteps 100 --exp-name baseline_run_2 --support-policy biasedSupportLeft you are training the human 
 
@@ -78,6 +80,23 @@ class LR_Schedule(EnhancedEnum):
     LINEAR = "linear"
     EXPONENTIAL = "exponential"
     NONE = "none"
+
+
+class RewardComponentsTensorboardCallback(BaseCallback):
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        component_values = {}
+
+        for info in infos:
+            reward_components = info.get("reward_components", {})
+            for name, value in reward_components.items():
+                component_values.setdefault(name, []).append(float(value))
+
+        for name, values in component_values.items():
+            if values:
+                self.logger.record(f"reward_components/{name}", float(np.mean(values)))
+
+        return True
 
 def parse_args():
     # Command-line arguments
@@ -145,6 +164,31 @@ def parse_args():
         type=float,
         default=1.0,
         help="Discount factor for rewards (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--independent-victory-score-threshold",
+        type=int,
+        default=None,
+        help="Score threshold used for per-player victory checks and fairness reward shaping (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--disadvantaged-player",
+        type=str,
+        default=None,
+        choices=[Players.HUMAN.value, Players.SHUTTER.value, "both"],
+        help="Optional scripted player to handicap during training/evaluation renders. (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--disadvantaged-idle-prob",
+        type=float,
+        default=0.0,
+        help="Probability that the disadvantaged scripted player does nothing on a step. (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--disadvantaged-extra-shot-cooldown-frames",
+        type=int,
+        default=0,
+        help="Extra shooting cooldown, in frames, applied to the disadvantaged scripted player. (default: %(default)s)",
     )
     parser.add_argument(
         "--reward-model",
@@ -241,6 +285,10 @@ def main():
                 raise ValueError(f"Minimal complexity environment requires rules-based human policy. Use --human-policy {HumanPolicies.RULES_BASED.value}")
             if args.minimal_complexity_human_policy is None:
                 raise ValueError("Minimal complexity environment requires minimal complexity human policy. Use --minimal-complexity-human-policy")
+        if not (0.0 <= args.disadvantaged_idle_prob <= 1.0):
+            raise ValueError("--disadvantaged-idle-prob must be between 0 and 1")
+        if args.disadvantaged_extra_shot_cooldown_frames < 0:
+            raise ValueError("--disadvantaged-extra-shot-cooldown-frames must be non-negative")
 
     validate_args(args)
 
@@ -260,11 +308,12 @@ def main():
     if args.breakpoint_on_exception:
         from utils import enable_debug_hook
         enable_debug_hook()
+    action_space = ActionSpaces.NAO_ONLY
 
-    if args.joint_agent_action_space:
-        action_space = ActionSpaces.JOINT_AGENT
-    else:
-        action_space = ActionSpaces.HUMAN_ONLY
+    # if args.joint_agent_action_space:
+    #     action_space = ActionSpaces.JOINT_AGENT
+    # else:
+    #     action_space = ActionSpaces.HUMAN_ONLY
 
     if args.minimal_complexity_env:
         print("Training with minimal complexity environment: simplified observations, only human action space, rules-based human policy, and minimal complexity reward model. Nao support policy will be ignored")
@@ -284,6 +333,10 @@ def main():
         support_policy=NaoSupportPolicies(args.support_policy),
         rules_based_human_policy=HumanPolicies(args.human_policy) == HumanPolicies.RULES_BASED,
         minimal_complexity_env=args.minimal_complexity_env,
+        independent_victory_score_threshold=args.independent_victory_score_threshold,
+        disadvantaged_player=args.disadvantaged_player,
+        disadvantaged_idle_prob=args.disadvantaged_idle_prob,
+        disadvantaged_extra_shot_cooldown_frames=args.disadvantaged_extra_shot_cooldown_frames,
         render=args.render_during_training,
         fixed_framerate=None
     )
@@ -337,24 +390,43 @@ def main():
         learning_rate = exponential_schedule(args.lr)
     else:
         learning_rate = args.lr
-    model = DeepSarsa(
+    model = DQN(
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
-        verbose=1,  # what information to show at terminal
+        verbose=1,
+        learning_rate=learning_rate,
+        buffer_size=100000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=args.discount_factor,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=1000,
         exploration_initial_eps=EXPLORATION_INITIAL_EPS,
         exploration_fraction=args.exploration_fraction,
         exploration_final_eps=EXPLORATION_FINAL_EPS,
         tensorboard_log=log_dir,
-        learning_rate=learning_rate,
-        learning_starts=0,
-        gamma=args.discount_factor,
         device=device,
-        exploration_policy_fn=exploration_policy_fn,
-        train_freq=(1, "episode"),
-        gradient_steps=-1,
-        target_update_interval=1,#DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
     )
+    # model = DeepSarsa(
+    #     "MlpPolicy",
+    #     env,
+    #     policy_kwargs=policy_kwargs,
+    #     verbose=1,  # what information to show at terminal
+    #     exploration_initial_eps=EXPLORATION_INITIAL_EPS,
+    #     exploration_fraction=args.exploration_fraction,
+    #     exploration_final_eps=EXPLORATION_FINAL_EPS,
+    #     tensorboard_log=log_dir,
+    #     learning_rate=learning_rate,
+    #     learning_starts=0,
+    #     gamma=args.discount_factor,
+    #     device=device,
+    #     exploration_policy_fn=exploration_policy_fn,
+    #     train_freq=(1, "episode"),
+    #     gradient_steps=-1,
+    #     target_update_interval=1,#DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
+    # )
 
     # Training the model
     print(f"Training the model for {args.timesteps} timesteps...")
@@ -367,6 +439,7 @@ def main():
     model.learn(
         total_timesteps=args.timesteps,
         log_interval=4,
+        callback=RewardComponentsTensorboardCallback(),
         tb_log_name=tb_log_name,
         progress_bar=True
     )

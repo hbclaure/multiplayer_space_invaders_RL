@@ -1,0 +1,1 @@
+python train_new.py --reward-model naoFairness --independent-victory-score-threshold 1000 --timesteps 1000000 --exp-name test_run_three_actions_speed

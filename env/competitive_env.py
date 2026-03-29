@@ -7,7 +7,7 @@ import time
 from agents.nao_policy import NaoPolicy
 import copy
 from consts import RenderConsts, StateConsts, ObservationConsts, ActionConsts, Players, Enemies 
-from consts import InitialStateConsts, DynamicsConsts, RewardConsts, ScoreConsts, PolicyConsts
+from consts import InitialStateConsts, DynamicsConsts, RewardConsts, ScoreConsts, PolicyConsts, FairnessRewardConsts
 from env_utils import load_ship_image, load_bullet_image, SpaceInvadersState, SpaceInvadersConfig, SpaceInvadersRenderObjects
 from env_utils import index_to_boolean_policy, boolean_policy_to_index, tie_breaker_actions, frames_to_seconds, seconds_to_frames
 from agents.policies import human_rules_based_policy_from_state
@@ -311,7 +311,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
     # TODO: instantiate config outside of env instantiation to pass these all at once
     def __init__(
         self,
-        action_space=ActionSpaces.HUMAN_ONLY,
+        action_space=ActionSpaces.NAO_ONLY,
         verbose=False,
         reward_model=RewardTypes.FULL,
         render_mode=RenderModes.RGB_ARRAY.value,
@@ -327,6 +327,9 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         game_duration_frames=DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
         independent_victory_score_threshold=None,
         game_type=GameTypes.COMPETITIVE,
+        disadvantaged_player=None,
+        disadvantaged_idle_prob=0.0,
+        disadvantaged_extra_shot_cooldown_frames=0,
     ):
         """
         Arguments:
@@ -349,6 +352,9 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             independent_victory_score_threshold=independent_victory_score_threshold,
             interactive_players=interactive_players,
             game_type=game_type,
+            disadvantaged_player=disadvantaged_player,
+            disadvantaged_idle_prob=disadvantaged_idle_prob,
+            disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
         )
 
         # Set up rendering
@@ -368,15 +374,21 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             dtype=ObservationConsts.DATA_TYPE
         )
 
-        # We have 4 actions, corresponding to 'left', 'right', 'shoot' and 'nothing'
+        # Human/Shutter agents use the standard gameplay actions. The Nao-only setup
+        # instead chooses whether Nao supports Human, supports Shutter, or idles in the center.
         assert ActionConsts.ACTION_SPACE_TYPE == 'Discrete', "Action space should be of type 'Discrete'"
-        self.action_space = spaces.Discrete(ActionConsts.DIM)
+        if self.config.action_space == ActionSpaces.NAO_ONLY:
+            self.action_space = spaces.Discrete(3)
+        else:
+            self.action_space = spaces.Discrete(ActionConsts.DIM)
 
         # Define state variables
         self.state = SpaceInvadersState(self.config, init_all_values=True)
         self.step_info = StepInfo()
+        self.last_reward_components = {}
         if self.config.use_recent_states_buffer:
-            self.recent_states: Deque[SpaceInvadersState] = deque(maxlen=ObservationConsts.RECENT_STATES_BUFFER_SIZE)
+            self.recent_observations: Deque[np.ndarray] = deque(maxlen=ObservationConsts.RECENT_STATES_BUFFER_SIZE)
+            self.recent_state_frames: Deque[int] = deque(maxlen=ObservationConsts.RECENT_STATES_BUFFER_SIZE)
 
         # Agent handling
         if self.config.action_space == ActionSpaces.JOINT_AGENT:
@@ -388,7 +400,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         self.nao_policy_instance = NaoPolicy(
             InitialStateConsts.NAO_POSITION_Y, RenderConsts.SCREEN_WIDTH, RenderConsts.SCREEN_HEIGHT, DynamicsConsts.VERTICAL_BUFFER,
             DynamicsConsts.HIT_RANGE, DynamicsConsts.SECOND_HIT_RANGE, DynamicsConsts.SHOOTING_RANGE, DynamicsConsts.NAO_RELATIVE_SPEED, DynamicsConsts.FREQUENCY_BOUND_FRAMES, 
-            PolicyConsts.POLICY_MODE, self.config.support_policy
+            PolicyConsts.POLICY_MODE, #self.config.support_policy
         )
 
         # Initialize clock
@@ -455,19 +467,20 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         return screen, rendered_objects
     
     def _update_recent_states_buffer(self, validate=True):
-        self.recent_states.append(copy.deepcopy(self.state))
+        current_observation = self.state.get_observation(minimal_observation=self.config.minimal_complexity_env)
+        self.recent_observations.append(np.array(current_observation, copy=True))
+        self.recent_state_frames.append(self.state.time_state.frame)
 
         if validate:
-            for i, state in enumerate(reversed(self.recent_states)):
+            for i, frame in enumerate(reversed(self.recent_state_frames)):
                 expected_frames_until_current = i
-                frames_until_current = self.state.time_state.frame - state.time_state.frame
+                frames_until_current = self.state.time_state.frame - frame
                 if frames_until_current != expected_frames_until_current:
                     raise ValueError(f"Recent state {i} items from the end of the buffer has {frames_until_current} frames until current state. Expected {expected_frames_until_current}")
     
     def _get_stacked_recent_observations(self):
         # gather observation stacked from recent states
-        recent_observations = [state.get_observation(minimal_observation=self.config.minimal_complexity_env) for state in self.recent_states]
-        stacked_observation = np.concatenate(recent_observations, axis=0)
+        stacked_observation = np.concatenate(list(self.recent_observations), axis=0)
 
         # pad stacked observation to constant dim
         assert ObservationConsts.OBS_SPACE_TYPE == 'Box', "Observation space should be of type 'Box'"
@@ -486,7 +499,8 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
 
         observation = None
         if self.config.use_recent_states_buffer:
-            self.recent_states.clear()
+            self.recent_observations.clear()
+            self.recent_state_frames.clear()
             self._update_recent_states_buffer()
             if self.config.use_observations:
                 observation = self._get_stacked_recent_observations()
@@ -547,64 +561,102 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             # No actions for Nao and Shutter
             left, right, shoot = False, False, False
             left_shutter, right_shutter, shoot_shutter = False, False, False
+
         else:
-            # Run Nao policy and update support decision
-            left, right, shoot, nearest_enemy_nao, nao_supporting_player, agent_powerup,  = self.nao_policy_instance.nao_policy(
-                state=self.state, images=self.rendered_objects
-            ) #removed requested_robot_action
+            ##### For old entrypoint before play_interactive_game.py, where action encodes only human/left action
+            # # Human action is automated and determined via step(action) in gym style
+            # action_human = action
+
+            # # Shutter policy is automated
+            # left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+            #####
+            if action == 0:
+                selected_player = Players.HUMAN
+            elif action == 1:
+                selected_player = Players.SHUTTER
+            elif action == 2:
+                selected_player = Players.NAO
+            else:
+                raise ValueError("Invalid Nao selection action")
             
-            if self.config.game_type == GameTypes.COMPETITIVE:
-                # Only communicate nao's policy if the game is competitive and not tutorial
-                #self.step_info.requested_robot_action = requested_robot_action
-                pass
+            
+            #### For new play_interactive_game.py entrypoint where `action` has ignorable no-ops for non-interactive players
+            # TODO: refactor so that automated policy decides the action within play_interactive_game.py+utils instead of passing no-op actions
+            left, right, shoot, nearest_enemy_nao, nao_supporting_player, agent_powerup,  = self.nao_policy_instance.nao_policy(
+                state=self.state, 
+                
+                support_target = selected_player, #Figure this out,
+                images=self.rendered_objects
+            ) #removed requested_robot_action
             if nao_supporting_player == Players.HUMAN:
                 self.state.history.support_frame_count[Players.HUMAN] +=1 #add to the frame count if support Human
             elif nao_supporting_player == Players.SHUTTER:
                 self.state.history.support_frame_count[Players.SHUTTER] +=1 #add to the frame count if support Shutter
             self.state.players_state.nao_supporting_player = nao_supporting_player
+            left_human, right_human, shoot_human = self.human_policy()
+            action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
+            left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+        
 
-            # Run standard shutter and human policy vs control interactively
-            if self.config.interactive_mode == InteractiveModes.NONE:
-                ##### For old entrypoint before play_interactive_game.py, where action encodes only human/left action
-                # # Human action is automated and determined via step(action) in gym style
-                # action_human = action
 
-                # # Shutter policy is automated
-                # left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
-                #####
+        # else:
+        #     # Run Nao policy and update support decision
+        #     left, right, shoot, nearest_enemy_nao, nao_supporting_player, agent_powerup,  = self.nao_policy_instance.nao_policy(
+        #         state=self.state, images=self.rendered_objects
+        #     ) #removed requested_robot_action
+            
+        #     if self.config.game_type == GameTypes.COMPETITIVE:
+        #         # Only communicate nao's policy if the game is competitive and not tutorial
+        #         #self.step_info.requested_robot_action = requested_robot_action
+        #         pass
+        #     if nao_supporting_player == Players.HUMAN:
+        #         self.state.history.support_frame_count[Players.HUMAN] +=1 #add to the frame count if support Human
+        #     elif nao_supporting_player == Players.SHUTTER:
+        #         self.state.history.support_frame_count[Players.SHUTTER] +=1 #add to the frame count if support Shutter
+        #     self.state.players_state.nao_supporting_player = nao_supporting_player
+
+        #     # Run standard shutter and human policy vs control interactively
+        #     if self.config.interactive_mode == InteractiveModes.NONE:
+        #         ##### For old entrypoint before play_interactive_game.py, where action encodes only human/left action
+        #         # # Human action is automated and determined via step(action) in gym style
+        #         # action_human = action
+
+        #         # # Shutter policy is automated
+        #         # left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+        #         #####
                 
                
-                #### For new play_interactive_game.py entrypoint where `action` has ignorable no-ops for non-interactive players
-                # TODO: refactor so that automated policy decides the action within play_interactive_game.py+utils instead of passing no-op actions
-                left_human, right_human, shoot_human = self.human_policy()
-                action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
-                left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
-            else:
-                # interactive_players determines which players will be controlled interactively vs using an 
-                # automated policy. It could be one or both human/shutter that are interactive
+        #         #### For new play_interactive_game.py entrypoint where `action` has ignorable no-ops for non-interactive players
+        #         # TODO: refactor so that automated policy decides the action within play_interactive_game.py+utils instead of passing no-op actions
+        #         left_human, right_human, shoot_human = self.human_policy()
+        #         action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
+        #         left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+        #     else:
+        #         # interactive_players determines which players will be controlled interactively vs using an 
+        #         # automated policy. It could be one or both human/shutter that are interactive
 
-                if Players.HUMAN in self.config.interactive_players:
-                    # Human player controlled interactively
-                    #left_human, right_human, shoot_human = index_to_boolean_policy(action["left_player_action_index"])
-                    action_human = action["left_player_action_index"]
-                elif self.config.game_type == GameTypes.COMPETITIVE:
-                    # Human action is automated and determined via step(action) in gym style
-                    left_human, right_human, shoot_human = self.human_policy()
-                    action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
-                elif self.config.game_type == GameTypes.COMPETITIVE_TUTORIAL:
-                    # Human/left action is a no-op in the tutorial while Shutter/right player is controlled interactively
-                    left_human, right_human, shoot_human = False, False, False
-                    action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
+        #         if Players.HUMAN in self.config.interactive_players:
+        #             # Human player controlled interactively
+        #             #left_human, right_human, shoot_human = index_to_boolean_policy(action["left_player_action_index"])
+        #             action_human = action["left_player_action_index"]
+        #         elif self.config.game_type == GameTypes.COMPETITIVE:
+        #             # Human action is automated and determined via step(action) in gym style
+        #             left_human, right_human, shoot_human = self.human_policy()
+        #             action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
+        #         elif self.config.game_type == GameTypes.COMPETITIVE_TUTORIAL:
+        #             # Human/left action is a no-op in the tutorial while Shutter/right player is controlled interactively
+        #             left_human, right_human, shoot_human = False, False, False
+        #             action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
 
-                if Players.SHUTTER in self.config.interactive_players:
-                    # Shutter player controlled interactively
-                    left_shutter, right_shutter, shoot_shutter = index_to_boolean_policy(action["right_player_action_index"])
-                elif self.config.game_type == GameTypes.COMPETITIVE:
-                    # Shutter player controlled by automated policy
-                    left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
-                elif self.config.game_type == GameTypes.COMPETITIVE_TUTORIAL:
-                    # Shutter/right action is a no-op in the tutorial while Human/left player is controlled interactively
-                    left_shutter, right_shutter, shoot_shutter = False, False, False
+        #         if Players.SHUTTER in self.config.interactive_players:
+        #             # Shutter player controlled interactively
+        #             left_shutter, right_shutter, shoot_shutter = index_to_boolean_policy(action["right_player_action_index"])
+        #         elif self.config.game_type == GameTypes.COMPETITIVE:
+        #             # Shutter player controlled by automated policy
+        #             left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+        #         elif self.config.game_type == GameTypes.COMPETITIVE_TUTORIAL:
+        #             # Shutter/right action is a no-op in the tutorial while Human/left player is controlled interactively
+        #             left_shutter, right_shutter, shoot_shutter = False, False, False
 
         # TODO: update to condense left/right/shoot actions into single variable for each player
         self.action_handler(action_human,left,right,shoot,left_shutter, right_shutter, shoot_shutter)
@@ -640,7 +692,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             if self.state.bullet_state.enemyb_free == []:
                 print('WARNING')
 
-        if self.config.use_observations:
+        if self.config.use_observations and not self.config.use_recent_states_buffer:
             observation = self.state.get_observation(minimal_observation=self.config.minimal_complexity_env) # Get observation 
         else:
             observation = None
@@ -707,7 +759,27 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             raise NotImplementedError("Minimal complexity environment doesn't have the argument to decide which minimal human policy")
             # from agents.policies import minimal_human_rules_based_policy_from_state
             # return minimal_human_rules_based_policy_from_state(self.state)
-        return human_rules_based_policy_from_state(self.state)
+        left, right, shoot = human_rules_based_policy_from_state(self.state)
+        return self._apply_policy_handicap(Players.HUMAN, left, right, shoot)
+
+    def _apply_policy_handicap(self, player: Players, left: bool, right: bool, shoot: bool):
+        if self.config.disadvantaged_player not in [player.value, "both"]:
+            return left, right, shoot
+
+        if (
+            shoot
+            and self.config.disadvantaged_extra_shot_cooldown_frames > 0
+        ):
+            last_shot_frame = self.state.history.last_shot_frame[player.value]
+            if last_shot_frame != float("-inf"):
+                frames_since_last_shot = self.state.time_state.frame - last_shot_frame
+                if frames_since_last_shot < self.config.disadvantaged_extra_shot_cooldown_frames:
+                    shoot = False
+
+        if self.config.disadvantaged_idle_prob > 0.0 and random.random() < self.config.disadvantaged_idle_prob:
+            return False, False, False
+
+        return left, right, shoot
 
     # def save_state(self):
     #     """Return a deepcopy of the environment's state."""
@@ -769,7 +841,8 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         self.state = state
         
         if self.config.use_recent_states_buffer:
-            self.recent_states.clear()
+            self.recent_observations.clear()
+            self.recent_state_frames.clear()
             self._update_recent_states_buffer()
 
     def get_recent_states(self, copy_states: bool = True) -> Deque[SpaceInvadersState]:
@@ -938,48 +1011,56 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
 
         # TODO: can the agent execute multiple actions at once???
         #assert sum([left, right, shoot]) <= 1, "Agent can only execute one action at a time"
-        return left,right, shoot
+        return self._apply_policy_handicap(Players.SHUTTER, left, right, shoot)
 
 
     def bullet_threat_check(self):
         """"
-        Checks whether the human spaceship is aligned in the same column as an enemy bullet. Also checks how much time before the bullet collides with the human spaceship
+        Checks whether the Human or Shutter spaceship is aligned in the same column as an enemy bullet and how long until collision.
         """
-        #ensure that these are set to zero or a large number
-        # TODO: use reset function built into State object for these two variables?
-        self.state.bullet_state.bullet_threat_binary = [0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
-        self.state.bullet_state.frames_until_collision =[None] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+        def update_player_threats(player, column_offset, enemy_x_positions, threat_attr, collision_attr):
+            setattr(self.state.bullet_state, threat_attr, [0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE)
+            setattr(self.state.bullet_state, collision_attr, [None] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE)
 
-        spaceship_left_edge, spaceship_right_edge, spaceship_upper_edge = self.get_player_ship_edges(Players.HUMAN)
-        if spaceship_left_edge < 0:
-            #Given that the spaceship can move partially beyond the screen's left edge, the left edge is set to zero if it moves to the leftmost edge.
-            spaceship_left_edge = 0
+            spaceship_left_edge, spaceship_right_edge, spaceship_upper_edge = self.get_player_ship_edges(player)
+            spaceship_left_edge = max(0, spaceship_left_edge)
 
-       
-        for col in range(StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE):
-            min_frames_until_collision = None
-            bullet_x = InitialStateConsts.HUMAN_ENEMIES_X[col]  # Get the x position of the enemy in this column
-            # Check both bullets in the column
-            for bullet_index in range(StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN):
-                bullet_y = self.state.bullet_state.bullet_y_positions[col, bullet_index]
+            threat_values = getattr(self.state.bullet_state, threat_attr)
+            collision_values = getattr(self.state.bullet_state, collision_attr)
 
-                # Check if there is an active bullet (non-zero y position)
-                if bullet_y > 0:
-                    # Since the y-position of the spaceship is fixed, we only need to check the x-position
-                    if spaceship_left_edge <= bullet_x <= spaceship_right_edge:
-                        distance_to_travel = spaceship_upper_edge- bullet_y
+            for col in range(StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE):
+                min_frames_until_collision = None
+                bullet_x = enemy_x_positions[col]
+                bullet_col = col + column_offset
+                for bullet_index in range(StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN):
+                    bullet_y = self.state.bullet_state.bullet_y_positions[bullet_col, bullet_index]
+                    if bullet_y > 0 and spaceship_left_edge <= bullet_x <= spaceship_right_edge:
+                        distance_to_travel = spaceship_upper_edge - bullet_y
                         if distance_to_travel > 0:
-                            self.state.bullet_state.bullet_threat_binary[col] = 1
-                            # Calculate the time until collision
+                            threat_values[col] = 1
                             frames_to_collision = distance_to_travel / DynamicsConsts.BULLET_VELOCITY
-                            # Update the time until collision for the column if this bullet is a closer threat
                             if min_frames_until_collision is None or frames_to_collision < min_frames_until_collision:
                                 min_frames_until_collision = frames_to_collision
 
-            if min_frames_until_collision is None:
-                self.state.bullet_state.frames_until_collision[col] = ObservationConsts.NO_FRAMES_UNTIL_BULLET_COLLISION
-            else:
-                self.state.bullet_state.frames_until_collision[col] = min_frames_until_collision
+                if min_frames_until_collision is None:
+                    collision_values[col] = ObservationConsts.NO_FRAMES_UNTIL_BULLET_COLLISION
+                else:
+                    collision_values[col] = min_frames_until_collision
+
+        update_player_threats(
+            player=Players.HUMAN,
+            column_offset=0,
+            enemy_x_positions=InitialStateConsts.HUMAN_ENEMIES_X,
+            threat_attr="bullet_threat_binary",
+            collision_attr="frames_until_collision",
+        )
+        update_player_threats(
+            player=Players.SHUTTER,
+            column_offset=StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE,
+            enemy_x_positions=InitialStateConsts.SHUTTER_ENEMIES_X,
+            threat_attr="shutter_bullet_threat_binary",
+            collision_attr="shutter_frames_until_collision",
+        )
     
     def _get_info(self):
         """
@@ -1001,8 +1082,9 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         # assuming terminated means success
         success = self.state.time_state.frame >= self.config.game_duration_frames 
         info = {
-            "step_info": copy.deepcopy(self.step_info),
+            "step_info": self.step_info,
             "is_success": success,
+            "reward_components": self.last_reward_components,
         }
         
         # TODO: step info should have actions of agents that are part of the environment
@@ -1022,16 +1104,16 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         left_human,right_human,shoot_human = index_to_boolean_policy(action)
         left_human,right_human,shoot_human = tie_breaker_actions(left_human,right_human,shoot_human)
         if left_human:
-            enacted_left_human = self.move_left(self.agent_selected)
+            enacted_left_human = self.move_left("Human")
             
         if right_human:  #  '1' corresponds to 'move_right'
-            enacted_right_human = self.move_right(self.agent_selected)
+            enacted_right_human = self.move_right("Human")
             
         if shoot_human:  # '2' corresponds to 'shoot'
-            enacted_shoot_human = self.shoot(self.agent_selected)
+            enacted_shoot_human = self.shoot("Human")
             
             
-        # For Shutter and Nao
+        # For Shutter
         for agent in self.agents_unselected:
             if agent == "Shutter":
 
@@ -1050,21 +1132,16 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 if shoot_shutter:
                     enacted_shoot_shutter = self.shoot(agent)
 
-            else:
-                #Nao actions
+        # Nao actions
+        left_nao,right_nao,shoot_nao= tie_breaker_actions(left_nao,right_nao,shoot_nao)
+        if left_nao:
+            enacted_left_nao = self.move_left("Nao")
+        
+        if right_nao:
+            enacted_right_nao = self.move_right("Nao")
 
-                left_nao,right_nao,shoot_nao= tie_breaker_actions(left_nao,right_nao,shoot_nao)
-                # if left_nao and shoot_nao or right_nao and shoot_nao or left_nao and right_nao:
-                #     "error"
-                #     assert False,"mix"
-                if left_nao:
-                    enacted_left_nao = self.move_left(agent)
-                  
-                if right_nao:                  
-                    enacted_right_nao = self.move_right(agent)
-   
-                if shoot_nao:           
-                    enacted_shoot_nao = self.shoot(agent)
+        if shoot_nao:
+            enacted_shoot_nao = self.shoot("Nao")
         
         self.step_info.actions_taken[Players.HUMAN] = SingleAgentAction(enacted_left_human, enacted_right_human, enacted_shoot_human)
         self.step_info.actions_taken[Players.SHUTTER] = SingleAgentAction(enacted_left_shutter, enacted_right_shutter, enacted_shoot_shutter)
@@ -1153,9 +1230,9 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         #Create slots for bullets
         # TODO: make this even for both players???
         agent_slots = {
-        'Human': [0, 1,2,3],
-        'Shutter': [4, 5, 6],
-        'Nao': [7, 8, 9]
+        'Human': [0, 1, 2],
+        'Shutter': [3, 4, 5],
+        'Nao': [6, 7, 8, 9]
         }
         # Check that the assigned slots line up with the enemy columns
         assert set(range(StateConsts.NUM_ENEMY_COLUMNS)) == {index for sublist in agent_slots.values() for index in sublist}
@@ -1233,6 +1310,60 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 self.step_info.player_victory_rewards[Players.SHUTTER] += RewardConsts.VICTORY_REWARD
             else:
                 raise ValueError(f"Leading player {leading_player} not recognized. Must be {Players.HUMAN} or {Players.SHUTTER}")
+
+    def _get_fairness_threshold(self) -> float:
+        if self.config.independent_victory_score_threshold is not None:
+            return float(self.config.independent_victory_score_threshold)
+        return float(ScoreConsts.BONUS_FOR_HITTING_ENEMY * StateConsts.NUM_ENEMIES / StateConsts.NUM_SIDES)
+
+    def _compute_nao_fairness_reward(self) -> float:
+        threshold = self._get_fairness_threshold()
+        epsilon = FairnessRewardConsts.EPSILON
+
+        human_progress = self.state.get_player_score(Players.HUMAN, include_robot_contributions=True) / threshold
+        shutter_progress = self.state.get_player_score(Players.SHUTTER, include_robot_contributions=True) / threshold
+
+        human_score = self.state.get_player_score(Players.HUMAN, include_robot_contributions=True)
+        shutter_score = self.state.get_player_score(Players.SHUTTER, include_robot_contributions=True)
+        score_gap = abs(human_score - shutter_score)
+        team_reward = 1.0 - min(score_gap / RewardConsts.LEADING_SCORE_THRESHOLD, 1.0)
+
+        progress_denom = human_progress + shutter_progress + epsilon
+        progress_equity = (human_progress - shutter_progress) / progress_denom
+        outcome_reward = -abs(progress_equity)
+
+        human_support_frames = self.state.history.support_frame_count[Players.HUMAN]
+        shutter_support_frames = self.state.history.support_frame_count[Players.SHUTTER]
+        total_support_frames = human_support_frames + shutter_support_frames
+        if total_support_frames == 0:
+            time_equity = 0.0
+        else:
+            time_equity = (human_support_frames - shutter_support_frames) / (total_support_frames + epsilon)
+        time_reward = -abs(time_equity)
+
+        human_reached_threshold = self.state.get_player_score(Players.HUMAN, include_robot_contributions=True) >= threshold
+        shutter_reached_threshold = self.state.get_player_score(Players.SHUTTER, include_robot_contributions=True) >= threshold
+        if human_reached_threshold and shutter_reached_threshold:
+            threshold_reward = 1.0
+        elif human_reached_threshold or shutter_reached_threshold:
+            threshold_reward = -2.0
+        else:
+            threshold_reward = 0.0
+
+        total_reward = (
+            FairnessRewardConsts.TEAM_WEIGHT * team_reward
+            + FairnessRewardConsts.OUTCOME_WEIGHT * outcome_reward
+            # + FairnessRewardConsts.TIME_WEIGHT * time_reward
+            + FairnessRewardConsts.THRESHOLD_WEIGHT * threshold_reward
+        )
+        self.last_reward_components = {
+            "team": team_reward,
+            "outcome": outcome_reward,
+            "time": time_reward,
+            "threshold": threshold_reward,
+            "total": total_reward,
+        }
+        return total_reward
     
     def reward_handler(self):
         """
@@ -1257,6 +1388,11 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 enemy_elimination_reward = self.step_info.enemy_elimination_rewards.get(player, 0)
                 player_shoot_reward = self.step_info.player_shoot_rewards.get(player, 0)
                 player_rewards[player] = enemy_elimination_reward + player_shoot_reward
+            return player_rewards
+
+        elif self.config.reward_model == RewardTypes.NAO_FAIRNESS:
+            player_rewards = Players.default_dict(float)
+            player_rewards[Players.NAO] = self._compute_nao_fairness_reward()
             return player_rewards
         
         else:
@@ -1419,47 +1555,55 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
 
     def sort_enemy_bullets_by_distance(self):
         """
-        Sorts enemy bullets by their Euclidean distance to the human spaceship.
+        Sorts enemy bullets by their Euclidean distance to the Human and Shutter spaceships.
         """
+        def update_player_bullet_distances(player, bullet_side, distance_attr, small_distance_attr, leftmost_enemy_x, rightmost_enemy_x):
+            if player == Players.HUMAN:
+                player_pos = np.array([self.state.players_state.human_position_x, self.state.players_state.human_position_y])
+            elif player == Players.SHUTTER:
+                player_pos = np.array([self.state.players_state.shutter_position_x, self.state.players_state.shutter_position_y])
+            else:
+                raise ValueError(f"Unsupported player for bullet-distance features: {player}")
+            bullets_on_side = np.copy(self.state.bullet_state.enemy_bullets)
+            if bullet_side == "left":
+                bullets_on_side[bullets_on_side[:, 0] > 0.5] = 0
+            else:
+                bullets_on_side[bullets_on_side[:, 0] < 0.5] = 0
 
-        #human position
-        human_pos = np.array([self.state.players_state.human_position_x, self.state.players_state.human_position_y])
-        left_bullets_only = np.copy(self.state.bullet_state.enemy_bullets)
-        left_bullets_only[left_bullets_only[:, 0] > 0.5] = 0
+            differences = bullets_on_side - player_pos
+            x_differences = differences[:, 0]
+            distances = np.linalg.norm(bullets_on_side - player_pos, axis=1)
 
-        #Get x differences of only bullets on human side of the screen to the human spaceship
-        differences = left_bullets_only - human_pos
-        x_differences = differences[:, 0]
-       
-        #Get distance from human position to bullets
-        distances = np.linalg.norm(left_bullets_only - human_pos, axis=1)
+            directional_distances = distances * np.sign(x_differences)
+            directional_distances[distances >= DynamicsConsts.MAX_BULLET_DISTANCE_TO_INCLUDE] = 0
+            directional_distances[(bullets_on_side[:, 0] == leftmost_enemy_x)] = -abs(directional_distances[(bullets_on_side[:, 0] == leftmost_enemy_x)])
+            directional_distances[(bullets_on_side[:, 0] == rightmost_enemy_x)] = abs(directional_distances[(bullets_on_side[:, 0] == rightmost_enemy_x)])
 
-        # Encode direction within the distance
-        directional_distances = distances * np.sign(x_differences)
-        directional_distances[distances >= DynamicsConsts.MAX_BULLET_DISTANCE_TO_INCLUDE] = 0
+            setattr(self.state.bullet_state, distance_attr, np.array(sorted(directional_distances, key=abs)))
+            non_zero_distances = getattr(self.state.bullet_state, distance_attr)
+            non_zero_distances = non_zero_distances[non_zero_distances != 0]
 
-        # Ensure 0.0314 has a negative sign and 0.331 has a positive sign- these are the leftmost and right most bullets on the human side of the screen
-        # TODO: what are 0.0314 and 0.331? Leftmost and rightmost enemy x positions on human side?
-        leftmost_enemy_x_humanside = min(InitialStateConsts.HUMAN_ENEMIES_X)
-        rightmost_enemy_x_humanside = max(InitialStateConsts.HUMAN_ENEMIES_X)
-        directional_distances[(left_bullets_only[:, 0] == leftmost_enemy_x_humanside)] = -abs(directional_distances[(left_bullets_only[:, 0] == leftmost_enemy_x_humanside)])
-        directional_distances[(left_bullets_only[:, 0] == rightmost_enemy_x_humanside)] = abs(directional_distances[(left_bullets_only[:, 0] == rightmost_enemy_x_humanside)])
+            small_distances = [0.0] * StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE
+            for i in range(min(len(non_zero_distances), StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE)):
+                small_distances[i] = non_zero_distances[i]
+            setattr(self.state.bullet_state, small_distance_attr, small_distances)
 
-
-        #Adjust so that anywhere that bullets don't exist is zero
-        distances[distances >= DynamicsConsts.MAX_BULLET_DISTANCE_TO_INCLUDE] = 0
-
-        #Updated this is distance to enemy bullets negative means left, positive means right
-        self.state.bullet_state.human_distance_to_bullets = np.array(sorted(directional_distances, key=abs))
-        # Extract non-zero distances
-        non_zero_distances = self.state.bullet_state.human_distance_to_bullets[self.state.bullet_state.human_distance_to_bullets != 0]
-
-        # Create a new list with three items, filled with zeros initially
-        self.state.bullet_state.small_distance_to_bullets = [0.0] * StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE
-
-        # Populate the new list with non-zero distances, up to three items. There is a maxiumum of 3 bullets that can exist on human side at a time.
-        for i in range(min(len(non_zero_distances), StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE)):
-            self.state.bullet_state.small_distance_to_bullets[i] = non_zero_distances[i]
+        update_player_bullet_distances(
+            player=Players.HUMAN,
+            bullet_side="left",
+            distance_attr="human_distance_to_bullets",
+            small_distance_attr="small_distance_to_bullets",
+            leftmost_enemy_x=min(InitialStateConsts.HUMAN_ENEMIES_X),
+            rightmost_enemy_x=max(InitialStateConsts.HUMAN_ENEMIES_X),
+        )
+        update_player_bullet_distances(
+            player=Players.SHUTTER,
+            bullet_side="right",
+            distance_attr="shutter_distance_to_bullets",
+            small_distance_attr="shutter_small_distance_to_bullets",
+            leftmost_enemy_x=min(InitialStateConsts.SHUTTER_ENEMIES_X),
+            rightmost_enemy_x=max(InitialStateConsts.SHUTTER_ENEMIES_X),
+        )
 
 
     def check_bullet_collision(self, bullet1, bullet2, collision_distance=0.01):
@@ -2711,7 +2855,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         self.nao_policy_instance = NaoPolicy(
             nao_y_position, RenderConsts.SCREEN_WIDTH, RenderConsts.SCREEN_HEIGHT, DynamicsConsts.VERTICAL_BUFFER,
             DynamicsConsts.HIT_RANGE, DynamicsConsts.SECOND_HIT_RANGE, DynamicsConsts.SHOOTING_RANGE, DynamicsConsts.NAO_RELATIVE_SPEED, DynamicsConsts.FREQUENCY_BOUND_FRAMES, 
-            PolicyConsts.POLICY_MODE, self.config.support_policy
+            PolicyConsts.POLICY_MODE, #self.config.support_policy
         )
     
     def new_nao_policy(self, new_nao_policy):

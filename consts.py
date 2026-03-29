@@ -60,7 +60,7 @@ class ObservationConsts:
     NO_FRAMES_UNTIL_BULLET_COLLISION = -1
     NO_SHOOTER = -1
 
-    DIM = 137#130
+    DIM = 159
     SHAPE = (DIM,)
     MINIMAL_COMPLEXITY_DIM = 9
     MINIMAL_COMPLEXITY_SHAPE = (MINIMAL_COMPLEXITY_DIM,)
@@ -90,6 +90,13 @@ class RewardConsts:
 class ScoreConsts:
     BONUS_FOR_HITTING_ENEMY = 10
     #INDEPENDENT_VICTORY_THRESHOLD = None
+
+class FairnessRewardConsts:
+    TEAM_WEIGHT = 1.0
+    OUTCOME_WEIGHT = 1.0
+    TIME_WEIGHT = 1.0
+    THRESHOLD_WEIGHT = 1.0
+    EPSILON = 1e-8
 
 # NOTE: constants prefixed with _ are configured in their units, but only used in code once converted to other units
 class DynamicsConsts:
@@ -330,6 +337,7 @@ class GameTypes(EnhancedEnum):
 class RewardTypes(EnhancedEnum):
     FULL = "full"
     MINIMAL_COMPLEXITY = "minimalComplexity"
+    NAO_FAIRNESS = "naoFairness"
 
 class RenderModes(EnhancedEnum):
     RGB_ARRAY = "rgb_array"
@@ -364,6 +372,7 @@ class ActionSpaces(EnhancedEnum):
     SHUTTER_ONLY = "ShutterOnly"
     NAO_ONLY = "NaoOnly"
     JOINT_AGENT = "JointAgent"
+    
 
 
 class ValueFunctionType(EnhancedEnum):
