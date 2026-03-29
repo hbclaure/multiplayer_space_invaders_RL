@@ -602,6 +602,10 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 elif self.config.game_type == GameTypes.COMPETITIVE:
                     # Shutter player controlled by automated policy
                     left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
+                    if shoot and random.random() < miss_shot_prob:
+                        print('can shoot but wont')
+                        shoot = False
+                    
                 elif self.config.game_type == GameTypes.COMPETITIVE_TUTORIAL:
                     # Shutter/right action is a no-op in the tutorial while Human/left player is controlled interactively
                     left_shutter, right_shutter, shoot_shutter = False, False, False

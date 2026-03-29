@@ -206,6 +206,18 @@ def parse_args():
         choices=MinimalComplexityHumanPolicies.values(),
         help="Minimal complexity human policy to use. (default: %(default)s)",
     )
+    parser.add_argument(
+        "--shutter-weak-player",
+        action="store_false",
+        help="Whether or not to use a weak player for shutter (default: %(default)s)",
+    )
+
+    parser.add_argument(
+        "--human-weak-player",
+        action="store_false",
+        help="Whether or not to use a weak player for human (default: %(default)s)",
+    )
+
 
     args = parser.parse_args()
     return args
