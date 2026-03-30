@@ -6,7 +6,7 @@ from gymnasium import spaces
 import time
 from agents.nao_policy import NaoPolicy
 import copy
-from consts import RenderConsts, StateConsts, ObservationConsts, ActionConsts, Players, Enemies 
+from consts import RenderConsts, StateConsts, ObservationConsts, ActionConsts, Players, Enemies, PlayerPerformanceConsts
 from consts import InitialStateConsts, DynamicsConsts, RewardConsts, ScoreConsts, PolicyConsts, FairnessRewardConsts
 from env_utils import load_ship_image, load_bullet_image, SpaceInvadersState, SpaceInvadersConfig, SpaceInvadersRenderObjects
 from env_utils import index_to_boolean_policy, boolean_policy_to_index, tie_breaker_actions, frames_to_seconds, seconds_to_frames
@@ -327,9 +327,11 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         game_duration_frames=DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
         independent_victory_score_threshold=None,
         game_type=GameTypes.COMPETITIVE,
-        disadvantaged_player=None,
-        disadvantaged_idle_prob=0.0,
-        disadvantaged_extra_shot_cooldown_frames=0,
+        # disadvantaged_player=None,
+        # disadvantaged_idle_prob=0.0,
+        # disadvantaged_extra_shot_cooldown_frames=0,
+        human_weak_player_flag = False,
+        shutter_weak_player_flag = False
     ):
         """
         Arguments:
@@ -352,9 +354,11 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             independent_victory_score_threshold=independent_victory_score_threshold,
             interactive_players=interactive_players,
             game_type=game_type,
-            disadvantaged_player=disadvantaged_player,
-            disadvantaged_idle_prob=disadvantaged_idle_prob,
-            disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
+            # disadvantaged_player=disadvantaged_player,
+            # disadvantaged_idle_prob=disadvantaged_idle_prob,
+            # disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
+            shutter_weak_player_flag = shutter_weak_player_flag,
+            human_weak_player_flag = human_weak_player_flag
         )
 
         # Set up rendering
@@ -594,9 +598,16 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 self.state.history.support_frame_count[Players.SHUTTER] +=1 #add to the frame count if support Shutter
             self.state.players_state.nao_supporting_player = nao_supporting_player
             left_human, right_human, shoot_human = self.human_policy()
+            #shoot if the action is shoot and the random value is less than the shooting threshold and there is a human weak player flag
+            if self.human_weak_player_flag and shoot_human:
+                shoot_human = random.random() < ObservationConsts.SHOOTING_THRESHOLD
+            #otherwise just ignore it
             action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
+
             left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
-        
+            if self.shutter_weak_player_flag and shoot_shutter:
+                shoot_shutter = random.random() < ObservationConsts.SHOOTING_THRESHOLD
+                    
 
 
         # else:
@@ -760,26 +771,26 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             # from agents.policies import minimal_human_rules_based_policy_from_state
             # return minimal_human_rules_based_policy_from_state(self.state)
         left, right, shoot = human_rules_based_policy_from_state(self.state)
-        return self._apply_policy_handicap(Players.HUMAN, left, right, shoot)
+        return left, right, shoot #self._apply_policy_handicap(Players.HUMAN, left, right, shoot)
 
-    def _apply_policy_handicap(self, player: Players, left: bool, right: bool, shoot: bool):
-        if self.config.disadvantaged_player not in [player.value, "both"]:
-            return left, right, shoot
+    # def _apply_policy_handicap(self, player: Players, left: bool, right: bool, shoot: bool):
+    #     if self.config.disadvantaged_player not in [player.value, "both"]:
+    #         return left, right, shoot
 
-        if (
-            shoot
-            and self.config.disadvantaged_extra_shot_cooldown_frames > 0
-        ):
-            last_shot_frame = self.state.history.last_shot_frame[player.value]
-            if last_shot_frame != float("-inf"):
-                frames_since_last_shot = self.state.time_state.frame - last_shot_frame
-                if frames_since_last_shot < self.config.disadvantaged_extra_shot_cooldown_frames:
-                    shoot = False
+    #     if (
+    #         shoot
+    #         and self.config.disadvantaged_extra_shot_cooldown_frames > 0
+    #     ):
+    #         last_shot_frame = self.state.history.last_shot_frame[player.value]
+    #         if last_shot_frame != float("-inf"):
+    #             frames_since_last_shot = self.state.time_state.frame - last_shot_frame
+    #             if frames_since_last_shot < self.config.disadvantaged_extra_shot_cooldown_frames:
+    #                 shoot = False
 
-        if self.config.disadvantaged_idle_prob > 0.0 and random.random() < self.config.disadvantaged_idle_prob:
-            return False, False, False
+    #     if self.config.disadvantaged_idle_prob > 0.0 and random.random() < self.config.disadvantaged_idle_prob:
+    #         return False, False, False
 
-        return left, right, shoot
+    #     return left, right, shoot
 
     # def save_state(self):
     #     """Return a deepcopy of the environment's state."""

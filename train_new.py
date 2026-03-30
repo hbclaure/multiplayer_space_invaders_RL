@@ -171,25 +171,25 @@ def parse_args():
         default=None,
         help="Score threshold used for per-player victory checks and fairness reward shaping (default: %(default)s)",
     )
-    parser.add_argument(
-        "--disadvantaged-player",
-        type=str,
-        default=None,
-        choices=[Players.HUMAN.value, Players.SHUTTER.value, "both"],
-        help="Optional scripted player to handicap during training/evaluation renders. (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--disadvantaged-idle-prob",
-        type=float,
-        default=0.0,
-        help="Probability that the disadvantaged scripted player does nothing on a step. (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--disadvantaged-extra-shot-cooldown-frames",
-        type=int,
-        default=0,
-        help="Extra shooting cooldown, in frames, applied to the disadvantaged scripted player. (default: %(default)s)",
-    )
+    # parser.add_argument(
+    #     "--disadvantaged-player",
+    #     type=str,
+    #     default=None,
+    #     choices=[Players.HUMAN.value, Players.SHUTTER.value, "both"],
+    #     help="Optional scripted player to handicap during training/evaluation renders. (default: %(default)s)",
+    # )
+    # parser.add_argument(
+    #     "--disadvantaged-idle-prob",
+    #     type=float,
+    #     default=0.0,
+    #     help="Probability that the disadvantaged scripted player does nothing on a step. (default: %(default)s)",
+    # )
+    # parser.add_argument(
+    #     "--disadvantaged-extra-shot-cooldown-frames",
+    #     type=int,
+    #     default=0,
+    #     help="Extra shooting cooldown, in frames, applied to the disadvantaged scripted player. (default: %(default)s)",
+    # )
     parser.add_argument(
         "--reward-model",
         type=str,
@@ -250,6 +250,16 @@ def parse_args():
         choices=MinimalComplexityHumanPolicies.values(),
         help="Minimal complexity human policy to use. (default: %(default)s)",
     )
+    parser.add_argument(
+        "--human-weak-player",
+        action="store_true",
+        help="Whether the human agent is a weak player (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--shutter-weak-player",
+        action="store_true",
+        help="Whether the shutter agent is a weak player (default: %(default)s)",
+    )
 
     args = parser.parse_args()
     return args
@@ -285,10 +295,10 @@ def main():
                 raise ValueError(f"Minimal complexity environment requires rules-based human policy. Use --human-policy {HumanPolicies.RULES_BASED.value}")
             if args.minimal_complexity_human_policy is None:
                 raise ValueError("Minimal complexity environment requires minimal complexity human policy. Use --minimal-complexity-human-policy")
-        if not (0.0 <= args.disadvantaged_idle_prob <= 1.0):
-            raise ValueError("--disadvantaged-idle-prob must be between 0 and 1")
-        if args.disadvantaged_extra_shot_cooldown_frames < 0:
-            raise ValueError("--disadvantaged-extra-shot-cooldown-frames must be non-negative")
+        # if not (0.0 <= args.disadvantaged_idle_prob <= 1.0):
+        #     raise ValueError("--disadvantaged-idle-prob must be between 0 and 1")
+        # if args.disadvantaged_extra_shot_cooldown_frames < 0:
+        #     raise ValueError("--disadvantaged-extra-shot-cooldown-frames must be non-negative")
 
     validate_args(args)
 
@@ -334,10 +344,12 @@ def main():
         rules_based_human_policy=HumanPolicies(args.human_policy) == HumanPolicies.RULES_BASED,
         minimal_complexity_env=args.minimal_complexity_env,
         independent_victory_score_threshold=args.independent_victory_score_threshold,
-        disadvantaged_player=args.disadvantaged_player,
-        disadvantaged_idle_prob=args.disadvantaged_idle_prob,
-        disadvantaged_extra_shot_cooldown_frames=args.disadvantaged_extra_shot_cooldown_frames,
-        render=args.render_during_training,
+        # disadvantaged_player=args.disadvantaged_player,
+        # disadvantaged_idle_prob=args.disadvantaged_idle_prob,
+        # disadvantaged_extra_shot_cooldown_frames=args.disadvantaged_extra_shot_cooldown_frames,
+        # render=args.render_during_training,
+        shutter_weak_player_flag = args.shutter_weak_player ,
+        human_weak_player_flag = args.human_weak_player,
         fixed_framerate=None
     )
     env = create_env(**env_creation_args)

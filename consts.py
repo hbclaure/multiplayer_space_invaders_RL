@@ -87,6 +87,10 @@ class RewardConsts:
 
     LEADING_SCORE_THRESHOLD = 50
 
+class PlayerPerformanceConsts:
+    #threshold that has to be surpassed
+    SHOOTING_THRESHOLD = .4
+
 class ScoreConsts:
     BONUS_FOR_HITTING_ENEMY = 10
     #INDEPENDENT_VICTORY_THRESHOLD = None
