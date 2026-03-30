@@ -237,9 +237,8 @@ def create_env(
     game_duration_frames=DynamicsConsts.MAX_NUM_FRAMES_PER_GAME,
     independent_victory_score_threshold=None,
     game_type=GameTypes.COMPETITIVE,
-    disadvantaged_player=None,
-    disadvantaged_idle_prob=0.0,
-    disadvantaged_extra_shot_cooldown_frames=0,
+    human_weak_player_flag=False,
+    shutter_weak_player_flag=False,
 ):    
     if not is_env_registered(env_id):
         raise ValueError(f"Environment {env_id} not registered. Use register_env() to register the environment.")
@@ -276,9 +275,8 @@ def create_env(
                 "game_duration_frames": game_duration_frames,
                 "independent_victory_score_threshold": independent_victory_score_threshold,
                 "game_type": game_type,
-                "disadvantaged_player": disadvantaged_player,
-                "disadvantaged_idle_prob": disadvantaged_idle_prob,
-                "disadvantaged_extra_shot_cooldown_frames": disadvantaged_extra_shot_cooldown_frames,
+                "human_weak_player_flag": human_weak_player_flag,
+                "shutter_weak_player_flag": shutter_weak_player_flag,
             },
         )
         if render or fixed_framerate is not None:
@@ -304,9 +302,8 @@ def create_env(
             game_duration_frames=game_duration_frames,
             independent_victory_score_threshold=independent_victory_score_threshold,
             game_type=game_type,
-            disadvantaged_player=disadvantaged_player,
-            disadvantaged_idle_prob=disadvantaged_idle_prob,
-            disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
+            human_weak_player_flag=human_weak_player_flag,
+            shutter_weak_player_flag=shutter_weak_player_flag,
         )
         env = EnvRenderWrapper(env, render=render, framerate=fixed_framerate)
         env.reset()

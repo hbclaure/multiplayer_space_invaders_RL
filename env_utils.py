@@ -1289,9 +1289,8 @@ class SpaceInvadersConfig(StrictDataclass):
     game_duration_frames: int
     independent_victory_score_threshold: int
     game_type: GameTypes
-    disadvantaged_player: Optional[str]
-    disadvantaged_idle_prob: float
-    disadvantaged_extra_shot_cooldown_frames: int
+    human_weak_player_flag: bool
+    shutter_weak_player_flag: bool
 
     def __post_init__(self):
         super().__post_init__()
@@ -1317,17 +1316,6 @@ class SpaceInvadersConfig(StrictDataclass):
             raise ValueError(f"game_duration_frames must be a positive integer, got {self.game_duration_frames}")
         if self.independent_victory_score_threshold is not None and self.independent_victory_score_threshold <= 0:
             raise ValueError(f"independent_victory_score_threshold must be a positive integer, got {self.independent_victory_score_threshold}")
-        if self.disadvantaged_player is not None and self.disadvantaged_player not in [Players.HUMAN.value, Players.SHUTTER.value, "both"]:
-            raise ValueError(
-                f"disadvantaged_player must be one of {[Players.HUMAN.value, Players.SHUTTER.value, 'both']} or None, got {self.disadvantaged_player}"
-            )
-        if not (0.0 <= self.disadvantaged_idle_prob <= 1.0):
-            raise ValueError(f"disadvantaged_idle_prob must be in [0, 1], got {self.disadvantaged_idle_prob}")
-        if self.disadvantaged_extra_shot_cooldown_frames < 0:
-            raise ValueError(
-                f"disadvantaged_extra_shot_cooldown_frames must be non-negative, got {self.disadvantaged_extra_shot_cooldown_frames}"
-            )
-
         if self.minimal_complexity_env:
             if self.reward_model != RewardTypes.MINIMAL_COMPLEXITY:
                 raise ValueError(f"SpaceInvadersConfig: Minimal complexity environment requires minimal complexity reward model. Use reward_model={RewardTypes.MINIMAL_COMPLEXITY}")

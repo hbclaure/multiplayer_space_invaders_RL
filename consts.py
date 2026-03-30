@@ -89,7 +89,7 @@ class RewardConsts:
 
 class PlayerPerformanceConsts:
     #threshold that has to be surpassed
-    SHOOTING_THRESHOLD = .4
+    SHOOTING_THRESHOLD = .01
 
 class ScoreConsts:
     BONUS_FOR_HITTING_ENEMY = 10

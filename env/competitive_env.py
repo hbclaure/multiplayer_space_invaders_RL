@@ -360,6 +360,8 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             shutter_weak_player_flag = shutter_weak_player_flag,
             human_weak_player_flag = human_weak_player_flag
         )
+        self.human_weak_player_flag = human_weak_player_flag
+        self.shutter_weak_player_flag = shutter_weak_player_flag
 
         # Set up rendering
         self.render_time = renderTime
@@ -599,14 +601,19 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             self.state.players_state.nao_supporting_player = nao_supporting_player
             left_human, right_human, shoot_human = self.human_policy()
             #shoot if the action is shoot and the random value is less than the shooting threshold and there is a human weak player flag
-            if self.human_weak_player_flag and shoot_human:
-                shoot_human = random.random() < ObservationConsts.SHOOTING_THRESHOLD
+            # if self.human_weak_player_flag and shoot_human:
+            #     print('shoot_human before', shoot_human)
+
+            #     shoot_human = random.random() < PlayerPerformanceConsts.SHOOTING_THRESHOLD
+            #     print('shoot_human after', shoot_human)
+
             #otherwise just ignore it
             action_human = boolean_policy_to_index(left_human, right_human, shoot_human)
 
             left_shutter, right_shutter, shoot_shutter = self.shutter_policy(nearest_enemy_nao)
-            if self.shutter_weak_player_flag and shoot_shutter:
-                shoot_shutter = random.random() < ObservationConsts.SHOOTING_THRESHOLD
+            # if self.shutter_weak_player_flag and shoot_shutter:
+            
+            #     shoot_shutter = random.random() < PlayerPerformanceConsts.SHOOTING_THRESHOLD
                     
 
 
@@ -1022,7 +1029,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
 
         # TODO: can the agent execute multiple actions at once???
         #assert sum([left, right, shoot]) <= 1, "Agent can only execute one action at a time"
-        return self._apply_policy_handicap(Players.SHUTTER, left, right, shoot)
+        return left, right, shoot #self._apply_policy_handicap(Players.SHUTTER, left, right, shoot)
 
 
     def bullet_threat_check(self):
@@ -1116,12 +1123,17 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         left_human,right_human,shoot_human = tie_breaker_actions(left_human,right_human,shoot_human)
         if left_human:
             enacted_left_human = self.move_left("Human")
+            #print('move left human', enacted_left_human)
             
         if right_human:  #  '1' corresponds to 'move_right'
             enacted_right_human = self.move_right("Human")
+            #print('move right human', enacted_right_human)
+
             
         if shoot_human:  # '2' corresponds to 'shoot'
             enacted_shoot_human = self.shoot("Human")
+            #print(' shoot human', enacted_shoot_human)
+
             
             
         # For Shutter
@@ -1259,6 +1271,13 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
                 pass
 
             if available_slots:
+                #print('able to shoot')
+                #if under the threshold then don't shoot. Adding this here because jsut because it can shoot doesn't necessarily mean it will because there may not be sufficient bullet slots 
+                if agent == 'Shutter' and self.shutter_weak_player_flag and random.random() >= PlayerPerformanceConsts.SHOOTING_THRESHOLD:
+                    return False
+                if  agent == 'Human' and self.human_weak_player_flag and random.random() >= PlayerPerformanceConsts.SHOOTING_THRESHOLD:
+                    #print('not shooting')
+                    return False
                 index =  min(available_slots)  # Get the lowest available slot
                 self.state.bullet_state.player_bullets[index] = [self.get_agent_position(agent)[0], self.get_agent_position(agent)[1] + bullet_speed, agent]
                 self.state.bullet_state.playerb_used.append(index)
@@ -1278,7 +1297,7 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         else:
             if self.config.verbose:
                 print("No Free Bullet Slots")
-
+        #print('fired a bullet',fired_bullet)
         return fired_bullet
 
 

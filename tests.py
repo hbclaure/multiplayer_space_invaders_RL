@@ -54,6 +54,16 @@ def parse_args():
         action="store_true",
         help="Render the evaluation episodes (default: %(default)s)",
     )
+    parser.add_argument(
+        "--human-weak-player",
+        action="store_true",
+        help="Whether the human agent is a weak player (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--shutter-weak-player",
+        action="store_true",
+        help="Whether the shutter agent is a weak player (default: %(default)s)",
+    )
     return parser.parse_args()
 
 
@@ -418,6 +428,8 @@ def main():
         rules_based_human_policy=True,
         support_policy=NaoSupportPolicies.EQUAL_SUPPORT,
         independent_victory_score_threshold=args.independent_victory_score_threshold,
+        shutter_weak_player_flag = args.shutter_weak_player ,
+        human_weak_player_flag = args.human_weak_player,
     )
 
     model = load_trained_model(model_path=model_path, env=env)

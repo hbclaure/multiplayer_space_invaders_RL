@@ -1,0 +1,1 @@
+python train_new.py --exp-name testing_feature_new --reward-model naoFairness --independent-victory-score-threshold 900 --timesteps 100 --multiprocessing --num-cpu 2 --human-weak-player
