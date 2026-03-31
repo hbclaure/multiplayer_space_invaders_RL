@@ -26,6 +26,12 @@ def parse_args():
         action="store_true",
         help="Whether the shutter agent is a weak player (default: %(default)s)",
     )
+    parser.add_argument(
+        "--adjust-player-shooting",
+        default=None,
+        choices=PlayerShootingAdjustment.values(),
+        help="Adjusting the shooting of a player, human, shutter, or both(default: %(default)s)",
+    )
     return parser.parse_args()
 
 MODEL_PATH = "experiments/testing_feature/models/env=competitive__support=equalSupport__reward=naoFairness.pt"
@@ -55,6 +61,7 @@ def main():
         fixed_framerate=DynamicsConsts.FRAMES_PER_SECOND,
         shutter_weak_player_flag = args.shutter_weak_player ,
         human_weak_player_flag = args.human_weak_player,
+        adjust_player_shooting = args.adjust_player_shooting
 
     )
 

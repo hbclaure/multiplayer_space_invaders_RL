@@ -1,1 +1,1 @@
-{"exp_name": "testing_feature_eval", "manual_model_experiment_name": "testing_feature", "num_episodes": 5, "independent_victory_score_threshold": 900, "render": false, "human_weak_player": true, "shutter_weak_player": false}
+{"exp_name": "testing_feature_eval", "manual_model_experiment_name": "testing_feature", "num_episodes": 5, "independent_victory_score_threshold": 900, "render": false, "human_weak_player": true, "shutter_weak_player": false, "adjust_player_shooting": "human"}

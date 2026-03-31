@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from stable_baselines3 import DQN
 
-from consts import ActionSpaces, DynamicsConsts, GameTypes, NaoSupportPolicies, Players, RewardTypes
+from consts import ActionSpaces, DynamicsConsts, GameTypes, NaoSupportPolicies, Players, RewardTypes, PlayerShootingAdjustment
 from deep_sarsa import DeepSarsa
 from path_consts import ANALYSIS_RESULTS_DIR, get_manual_model_path
 from utils import create_env, init_experiment_dir, register_env
@@ -63,6 +63,13 @@ def parse_args():
         "--shutter-weak-player",
         action="store_true",
         help="Whether the shutter agent is a weak player (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--adjust-player-shooting",
+        type=str,
+        default="both",
+        choices=PlayerShootingAdjustment.values(),
+        help="Adjusting the shooting of a player, human, shutter, or both(default: %(default)s)",
     )
     return parser.parse_args()
 
@@ -430,6 +437,9 @@ def main():
         independent_victory_score_threshold=args.independent_victory_score_threshold,
         shutter_weak_player_flag = args.shutter_weak_player ,
         human_weak_player_flag = args.human_weak_player,
+        adjust_player_shooting = args.adjust_player_shooting,
+
+        
     )
 
     model = load_trained_model(model_path=model_path, env=env)

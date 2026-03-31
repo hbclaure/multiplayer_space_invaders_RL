@@ -16,7 +16,7 @@ from deep_sarsa import DeepSarsa
 from path_consts import EXPERIMENTS_DIR
 from utils import init_experiment_dir, create_env, register_env
 from env_utils import boolean_policy_to_index
-from consts import DynamicsConsts, ObservationConsts, RewardTypes, GameTypes, RenderModes, HumanPolicies, NaoSupportPolicies, ActionSpaces, MinimalComplexityHumanPolicies, Players, PlayerShootingAdjustment
+from consts import DynamicsConsts, ObservationConsts, RewardTypes, GameTypes, RenderModes, HumanPolicies, NaoSupportPolicies, ActionSpaces, MinimalComplexityHumanPolicies, Players
 from agents.policies import human_rules_based_policy_from_obs, create_exploration_policy_fn
 #by running: python train_new.py --timesteps 100 --exp-name baseline_run_2 --support-policy biasedSupportLeft you are training the human 
 
@@ -260,15 +260,6 @@ def parse_args():
         action="store_true",
         help="Whether the shutter agent is a weak player (default: %(default)s)",
     )
-    
-    parser.add_argument(
-        "--adjust-player-shooting",
-        type=str,
-        default=None,
-        choices=PlayerShootingAdjustment.values(),
-        help="Adjusting the shooting of a player, human, shutter, or both(default: %(default)s)",
-    )
-
 
     args = parser.parse_args()
     return args
@@ -359,7 +350,6 @@ def main():
         # render=args.render_during_training,
         shutter_weak_player_flag = args.shutter_weak_player ,
         human_weak_player_flag = args.human_weak_player,
-        adjust_player_shooting = args.adjust_player_shooting,
         fixed_framerate=None
     )
     env = create_env(**env_creation_args)

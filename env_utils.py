@@ -1291,6 +1291,7 @@ class SpaceInvadersConfig(StrictDataclass):
     game_type: GameTypes
     human_weak_player_flag: bool
     shutter_weak_player_flag: bool
+    adjust_player_shooting: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()

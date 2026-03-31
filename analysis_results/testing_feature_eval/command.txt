@@ -1,1 +1,1 @@
-python tests.py --manual-model-experiment-name testing_feature --num-episodes 5 --exp-name testing_feature_eval --independent-victory-score-threshold 900 --human-weak-player
+python tests.py --manual-model-experiment-name testing_feature --num-episodes 5 --exp-name testing_feature_eval --independent-victory-score-threshold 900 --human-weak-player --adjust-player-shooting human

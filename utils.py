@@ -239,6 +239,7 @@ def create_env(
     game_type=GameTypes.COMPETITIVE,
     human_weak_player_flag=False,
     shutter_weak_player_flag=False,
+    adjust_player_shooting=None,
 ):    
     if not is_env_registered(env_id):
         raise ValueError(f"Environment {env_id} not registered. Use register_env() to register the environment.")
@@ -277,6 +278,7 @@ def create_env(
                 "game_type": game_type,
                 "human_weak_player_flag": human_weak_player_flag,
                 "shutter_weak_player_flag": shutter_weak_player_flag,
+                "adjust_player_shooting": adjust_player_shooting,
             },
         )
         if render or fixed_framerate is not None:
@@ -304,6 +306,7 @@ def create_env(
             game_type=game_type,
             human_weak_player_flag=human_weak_player_flag,
             shutter_weak_player_flag=shutter_weak_player_flag,
+            adjust_player_shooting=adjust_player_shooting,
         )
         env = EnvRenderWrapper(env, render=render, framerate=fixed_framerate)
         env.reset()

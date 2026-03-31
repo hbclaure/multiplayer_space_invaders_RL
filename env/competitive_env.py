@@ -11,11 +11,12 @@ from consts import InitialStateConsts, DynamicsConsts, RewardConsts, ScoreConsts
 from env_utils import load_ship_image, load_bullet_image, SpaceInvadersState, SpaceInvadersConfig, SpaceInvadersRenderObjects
 from env_utils import index_to_boolean_policy, boolean_policy_to_index, tie_breaker_actions, frames_to_seconds, seconds_to_frames
 from agents.policies import human_rules_based_policy_from_state
-from consts import RewardTypes, NaoSupportPolicies, RenderModes, ActionSpaces, action_space_to_player, InteractiveModes, GameTypes
+from consts import RewardTypes, NaoSupportPolicies, RenderModes, ActionSpaces, action_space_to_player, InteractiveModes, GameTypes, sample,PlayerShootingAdjustment
 from env_utils import StepInfo
 from agents.policies import SingleAgentAction
 from agents.control_mapping import PyGameGamepad
 from interactive_gameplay.utils import PygameEventWaiter, PyGameGamepad
+from scipy.stats import truncnorm
 
 
 from collections import deque
@@ -331,7 +332,8 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         # disadvantaged_idle_prob=0.0,
         # disadvantaged_extra_shot_cooldown_frames=0,
         human_weak_player_flag = False,
-        shutter_weak_player_flag = False
+        shutter_weak_player_flag = False,
+        adjust_player_shooting = PlayerShootingAdjustment.BOTH
     ):
         """
         Arguments:
@@ -358,8 +360,13 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             # disadvantaged_idle_prob=disadvantaged_idle_prob,
             # disadvantaged_extra_shot_cooldown_frames=disadvantaged_extra_shot_cooldown_frames,
             shutter_weak_player_flag = shutter_weak_player_flag,
-            human_weak_player_flag = human_weak_player_flag
+            human_weak_player_flag = human_weak_player_flag,
+            adjust_player_shooting  = adjust_player_shooting 
         )
+        self.adjust_player_shooting = adjust_player_shooting 
+
+   
+
         self.human_weak_player_flag = human_weak_player_flag
         self.shutter_weak_player_flag = shutter_weak_player_flag
 
@@ -412,6 +419,8 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         # Initialize clock
         self.clock = pygame.time.Clock()
         #self.state.start_time = time.time() # Start time for the game
+        
+        #create a shooting threshold depending on wether the 
 
     # Determine if using virtual display (not shown on screen but allowing pygame to compute placement of visual elements)
     def _using_visible_display(self):
@@ -517,6 +526,10 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
         info = self._get_info()
 
         self.clock = pygame.time.Clock() # Reset clock
+        if self.adjust_player_shooting == 'both':
+            #randomly select both players to be either good or bad
+            self.human_shooting_threshold_this_episode, self.human_playerSkill_description= sample()
+            self.shutter_shooting_threshold_this_episode, self.shutter_playerSkill_description= sample()
 
         return observation, info
 
@@ -1273,11 +1286,18 @@ class CompetitiveSpaceInvadersEnv(gym.Env):
             if available_slots:
                 #print('able to shoot')
                 #if under the threshold then don't shoot. Adding this here because jsut because it can shoot doesn't necessarily mean it will because there may not be sufficient bullet slots 
-                if agent == 'Shutter' and self.shutter_weak_player_flag and random.random() >= PlayerPerformanceConsts.SHOOTING_THRESHOLD:
+                if agent == 'Shutter' and self.shutter_weak_player_flag and random.random() >= PlayerPerformanceConsts.SINGLE_SHOOTING_THRESHOLD:
                     return False
-                if  agent == 'Human' and self.human_weak_player_flag and random.random() >= PlayerPerformanceConsts.SHOOTING_THRESHOLD:
+                if  agent == 'Human' and self.human_weak_player_flag and random.random() >= PlayerPerformanceConsts.SINGLE_SHOOTING_THRESHOLD:
                     #print('not shooting')
                     return False
+                
+                if self.adjust_player_shooting == "both" and agent == 'Shutter' and random.random() >= self.shutter_shooting_threshold_this_episode:
+                    return False
+                if self.adjust_player_shooting == "both" and agent == 'Human' and random.random() >= self.human_shooting_threshold_this_episode:
+                    return False
+
+                     
                 index =  min(available_slots)  # Get the lowest available slot
                 self.state.bullet_state.player_bullets[index] = [self.get_agent_position(agent)[0], self.get_agent_position(agent)[1] + bullet_speed, agent]
                 self.state.bullet_state.playerb_used.append(index)
