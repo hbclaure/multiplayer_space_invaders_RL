@@ -1,0 +1,1 @@
+python train_new.py --exp-name weigtend_threshold_low --reward-model naoFairness --independent-victory-score-threshold 600 --timesteps 5000000 --multiprocessing --num-cpu 2 --adjust-player-shooting both

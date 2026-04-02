@@ -118,7 +118,7 @@ class FairnessRewardConsts:
     TEAM_WEIGHT = 1.0
     OUTCOME_WEIGHT = 1.0
     TIME_WEIGHT = 1.0
-    THRESHOLD_WEIGHT = 1.0
+    THRESHOLD_WEIGHT = .1
     EPSILON = 1e-8
 
 # NOTE: constants prefixed with _ are configured in their units, but only used in code once converted to other units

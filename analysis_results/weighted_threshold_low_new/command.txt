@@ -1,0 +1,1 @@
+python tests.py --manual-model-experiment-name weigtend_threshold_low --num-episodes 150 --exp-name weighted_threshold_low_new --independent-victory-score-threshold 600 --human-weak-player --adjust-player-shooting both

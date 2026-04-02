@@ -1,0 +1,1 @@
+{"exp_name": "weighted_threshold_low_new", "manual_model_experiment_name": "weigtend_threshold_low", "num_episodes": 150, "independent_victory_score_threshold": 600, "render": false, "human_weak_player": true, "shutter_weak_player": false, "adjust_player_shooting": "both"}

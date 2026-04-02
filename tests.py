@@ -8,6 +8,7 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 import numpy as np
 from stable_baselines3 import DQN
+from tqdm import tqdm
 
 from consts import ActionSpaces, DynamicsConsts, GameTypes, NaoSupportPolicies, Players, RewardTypes, PlayerShootingAdjustment
 from deep_sarsa import DeepSarsa
@@ -109,6 +110,10 @@ def _finalize_episode_metrics(
     nao_action_bucket_counts: List[Dict[int, int]],
     score_bucket_snapshots: List[Dict[str, float]],
     episode_idx: int,
+    human_skill_label: str,
+    shutter_skill_label: str,
+    human_shooting_threshold: float,
+    shutter_shooting_threshold: float,
 ):
     human_support = final_state.history.support_frame_count[Players.HUMAN]
     shutter_support = final_state.history.support_frame_count[Players.SHUTTER]
@@ -126,6 +131,11 @@ def _finalize_episode_metrics(
 
     metrics = {
         "episode": episode_idx + 1,
+        "human_skill_label": human_skill_label,
+        "shutter_skill_label": shutter_skill_label,
+        "skill_pair": f"{human_skill_label}/{shutter_skill_label}",
+        "human_shooting_threshold": human_shooting_threshold,
+        "shutter_shooting_threshold": shutter_shooting_threshold,
         "human_support_frames": human_support,
         "shutter_support_frames": shutter_support,
         "idle_support_frames": idle_support,
@@ -154,13 +164,25 @@ def _finalize_episode_metrics(
     return metrics
 
 
+def _normalize_skill_label(raw_label: str) -> str:
+    if raw_label == "high_skill_player":
+        return "good"
+    if raw_label == "low_skill_player":
+        return "bad"
+    return "unknown"
+
+
 def evaluate_episodes(model, env, num_episodes: int) -> List[Dict[str, float]]:
     episode_metrics: List[Dict[str, float]] = []
     base_env = get_base_env(env)
 
-    for episode_idx in range(num_episodes):
+    for episode_idx in tqdm(range(num_episodes), desc="Evaluating episodes", unit="episode"):
         obs, info = env.reset()
         config = base_env.config
+        human_skill_label = _normalize_skill_label(getattr(base_env, "human_playerSkill_description", "unknown"))
+        shutter_skill_label = _normalize_skill_label(getattr(base_env, "shutter_playerSkill_description", "unknown"))
+        human_shooting_threshold = float(getattr(base_env, "human_shooting_threshold_this_episode", np.nan))
+        shutter_shooting_threshold = float(getattr(base_env, "shutter_shooting_threshold_this_episode", np.nan))
         half_frame = config.game_duration_frames // 2
         first_half_counts = {Players.HUMAN: 0, Players.SHUTTER: 0}
         second_half_counts = {Players.HUMAN: 0, Players.SHUTTER: 0}
@@ -219,6 +241,10 @@ def evaluate_episodes(model, env, num_episodes: int) -> List[Dict[str, float]]:
                 nao_action_bucket_counts=nao_action_bucket_counts,
                 score_bucket_snapshots=score_bucket_snapshots,
                 episode_idx=episode_idx,
+                human_skill_label=human_skill_label,
+                shutter_skill_label=shutter_skill_label,
+                human_shooting_threshold=human_shooting_threshold,
+                shutter_shooting_threshold=shutter_shooting_threshold,
             )
         )
 
@@ -241,6 +267,10 @@ def _save_plot(fig, output_dir: str, filename: str):
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def _sanitize_skill_pair(skill_pair: str) -> str:
+    return skill_pair.replace("/", "_")
 
 
 def plot_average_support_stacked(episode_metrics: List[Dict[str, float]], output_dir: str):
@@ -416,38 +446,82 @@ def plot_threshold_attainment(episode_metrics: List[Dict[str, float]], output_di
     return _save_plot(fig, output_dir, "10_threshold_attainment.png")
 
 
-def main():
-    args = parse_args()
-    print("Running tests.py with the following arguments:")
-    pprint.pprint(args)
+def plot_skill_pair_distribution(episode_metrics: List[Dict[str, float]], output_dir: str):
+    ordered_pairs = ["good/good", "good/bad", "bad/good", "bad/bad"]
+    counts = np.array([sum(1 for m in episode_metrics if m["skill_pair"] == pair) for pair in ordered_pairs], dtype=float)
 
-    output_dir = init_experiment_dir(ANALYSIS_RESULTS_DIR, args, wipe_dir=True)
-    _experiment_dir, model_path = get_manual_model_path(args.manual_model_experiment_name)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(ordered_pairs, counts, color=["#43a047", "#fb8c00", "#1e88e5", "#e53935"])
+    ax.set_ylabel("Episodes")
+    ax.set_title("Episode Skill-Pair Distribution")
+    ax.tick_params(axis="x", rotation=15)
+    return _save_plot(fig, output_dir, "11_skill_pair_distribution.png")
 
-    env_id = register_env(game_type=GameTypes.COMPETITIVE)
-    env = create_env(
-        env_id=env_id,
-        multiprocessing=False,
-        action_space=ActionSpaces.NAO_ONLY,
-        reward_model=RewardTypes.NAO_FAIRNESS,
-        render=args.render,
-        fixed_framerate=DynamicsConsts.FRAMES_PER_SECOND if args.render else None,
-        rules_based_human_policy=True,
-        support_policy=NaoSupportPolicies.EQUAL_SUPPORT,
-        independent_victory_score_threshold=args.independent_victory_score_threshold,
-        shutter_weak_player_flag = args.shutter_weak_player ,
-        human_weak_player_flag = args.human_weak_player,
-        adjust_player_shooting = args.adjust_player_shooting,
 
-        
-    )
+def plot_threshold_confusion_matrix(episode_metrics: List[Dict[str, float]], output_dir: str, threshold: float):
+    human_labels = ["good", "bad"]
+    shutter_labels = ["good", "bad"]
+    values = np.full((len(shutter_labels), len(human_labels)), np.nan, dtype=float)
+    counts = np.zeros((len(shutter_labels), len(human_labels)), dtype=int)
 
-    model = load_trained_model(model_path=model_path, env=env)
-    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes)
-    threshold = get_evaluation_threshold(args=args, experiment_dir=_experiment_dir, env=env)
+    for row_idx, shutter_label in enumerate(shutter_labels):
+        for col_idx, human_label in enumerate(human_labels):
+            matching = [
+                m for m in episode_metrics
+                if m["human_skill_label"] == human_label and m["shutter_skill_label"] == shutter_label
+            ]
+            counts[row_idx, col_idx] = len(matching)
+            if matching:
+                both_reached_rate = 100.0 * np.mean([
+                    (m["human_score_with_nao"] >= threshold) and (m["shutter_score_with_nao"] >= threshold)
+                    for m in matching
+                ])
+                values[row_idx, col_idx] = both_reached_rate
 
-    csv_path = save_episode_metrics_csv(episode_metrics=episode_metrics, output_dir=output_dir)
-    plot_paths = [
+    masked_values = np.ma.masked_invalid(values)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(masked_values, cmap="viridis", vmin=0, vmax=100)
+
+    ax.set_xticks(np.arange(len(human_labels)))
+    ax.set_xticklabels(human_labels)
+    ax.set_yticks(np.arange(len(shutter_labels)))
+    ax.set_yticklabels(shutter_labels)
+    ax.set_xlabel("Human Skill Type")
+    ax.set_ylabel("Shutter Skill Type")
+    ax.set_title("Both Players Reaching Threshold by Skill Pair (%)")
+
+    for row_idx in range(values.shape[0]):
+        for col_idx in range(values.shape[1]):
+            cell_value = values[row_idx, col_idx]
+            label = f"N/A\nn={counts[row_idx, col_idx]}" if np.isnan(cell_value) else f"{cell_value:.1f}%\nn={counts[row_idx, col_idx]}"
+            ax.text(col_idx, row_idx, label, ha="center", va="center", color="white")
+
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Both Reach Threshold (%)")
+    return _save_plot(fig, output_dir, "12_threshold_confusion_matrix.png")
+
+
+def plot_shooting_threshold_distribution(episode_metrics: List[Dict[str, float]], output_dir: str):
+    human_thresholds = np.array([m["human_shooting_threshold"] for m in episode_metrics], dtype=float)
+    shutter_thresholds = np.array([m["shutter_shooting_threshold"] for m in episode_metrics], dtype=float)
+    human_thresholds = human_thresholds[~np.isnan(human_thresholds)]
+    shutter_thresholds = shutter_thresholds[~np.isnan(shutter_thresholds)]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bins = 20
+    if human_thresholds.size:
+        ax.hist(human_thresholds, bins=bins, alpha=0.5, color="#2f7ed8", label="Human", density=False)
+    if shutter_thresholds.size:
+        ax.hist(shutter_thresholds, bins=bins, alpha=0.5, color="#c42525", label="Shutter", density=False)
+    ax.set_xlabel("Shooting Threshold")
+    ax.set_ylabel("Episode Count")
+    ax.set_title("Human vs Shutter Shooting Threshold Distribution")
+    ax.legend()
+    return _save_plot(fig, output_dir, "13_shooting_threshold_distribution.png")
+
+
+def save_all_plots(episode_metrics: List[Dict[str, float]], output_dir: str, threshold: float):
+    return [
         plot_average_support_stacked(episode_metrics, output_dir),
         plot_two_player_bar(
             episode_metrics,
@@ -490,13 +564,66 @@ def main():
         plot_nao_action_distribution_over_time(episode_metrics, output_dir),
         plot_scores_over_time(episode_metrics, output_dir),
         plot_threshold_attainment(episode_metrics, output_dir, threshold),
+        plot_skill_pair_distribution(episode_metrics, output_dir),
+        plot_threshold_confusion_matrix(episode_metrics, output_dir, threshold),
+        plot_shooting_threshold_distribution(episode_metrics, output_dir),
     ]
+
+
+def main():
+    args = parse_args()
+    print("Running tests.py with the following arguments:")
+    pprint.pprint(args)
+
+    output_dir = init_experiment_dir(ANALYSIS_RESULTS_DIR, args, wipe_dir=True)
+    _experiment_dir, model_path = get_manual_model_path(args.manual_model_experiment_name)
+
+    env_id = register_env(game_type=GameTypes.COMPETITIVE)
+    env = create_env(
+        env_id=env_id,
+        multiprocessing=False,
+        action_space=ActionSpaces.NAO_ONLY,
+        reward_model=RewardTypes.NAO_FAIRNESS,
+        render=args.render,
+        fixed_framerate=DynamicsConsts.FRAMES_PER_SECOND if args.render else None,
+        rules_based_human_policy=True,
+        support_policy=NaoSupportPolicies.EQUAL_SUPPORT,
+        independent_victory_score_threshold=args.independent_victory_score_threshold,
+        shutter_weak_player_flag = args.shutter_weak_player ,
+        human_weak_player_flag = args.human_weak_player,
+        adjust_player_shooting = args.adjust_player_shooting,
+
+        
+    )
+
+    model = load_trained_model(model_path=model_path, env=env)
+    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes)
+    threshold = get_evaluation_threshold(args=args, experiment_dir=_experiment_dir, env=env)
+
+    csv_path = save_episode_metrics_csv(episode_metrics=episode_metrics, output_dir=output_dir)
+    plot_paths = save_all_plots(episode_metrics, output_dir, threshold)
+
+    skill_groups = {}
+    for metric in episode_metrics:
+        skill_groups.setdefault(metric["skill_pair"], []).append(metric)
+
+    skill_group_outputs = []
+    for skill_pair, metrics in sorted(skill_groups.items()):
+        skill_output_dir = os.path.join(output_dir, f"skill_pair_{_sanitize_skill_pair(skill_pair)}")
+        os.makedirs(skill_output_dir, exist_ok=True)
+        skill_csv_path = save_episode_metrics_csv(metrics, skill_output_dir)
+        skill_plot_paths = save_all_plots(metrics, skill_output_dir, threshold)
+        skill_group_outputs.append((skill_pair, skill_csv_path, skill_plot_paths))
 
     env.close()
 
     print(f"Saved episode metrics to {csv_path}")
     for plot_path in plot_paths:
         print(f"Saved plot to {plot_path}")
+    for skill_pair, skill_csv_path, skill_plot_paths in skill_group_outputs:
+        print(f"Saved {skill_pair} episode metrics to {skill_csv_path}")
+        for plot_path in skill_plot_paths:
+            print(f"Saved {skill_pair} plot to {plot_path}")
 
 
 if __name__ == "__main__":
