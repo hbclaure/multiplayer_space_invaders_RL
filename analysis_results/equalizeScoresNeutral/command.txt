@@ -1,0 +1,1 @@
+python tests.py --nao-controller heuristic --num-episodes 150 --exp-name equalizeScoresNeutral --independent-victory-score-threshold 600 --adjust-player-shooting both --support-policy equalizeScoresNeutral

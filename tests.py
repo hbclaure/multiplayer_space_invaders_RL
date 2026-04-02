@@ -10,6 +10,7 @@ import numpy as np
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
+from agents.support_policies import BaseSupportPolicy
 from consts import ActionSpaces, DynamicsConsts, GameTypes, NaoSupportPolicies, Players, RewardTypes, PlayerShootingAdjustment
 from deep_sarsa import DeepSarsa
 from path_consts import ANALYSIS_RESULTS_DIR, get_manual_model_path
@@ -35,7 +36,7 @@ def parse_args():
     parser.add_argument(
         "--manual-model-experiment-name",
         type=str,
-        required=True,
+        default=None,
         help="Experiment directory name under experiments/ that contains the trained model.",
     )
     parser.add_argument(
@@ -72,6 +73,20 @@ def parse_args():
         choices=PlayerShootingAdjustment.values(),
         help="Adjusting the shooting of a player, human, shutter, or both(default: %(default)s)",
     )
+    parser.add_argument(
+        "--nao-controller",
+        type=str,
+        default="trained",
+        choices=["trained", "heuristic"],
+        help="Use the trained model or a heuristic Nao support policy (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--support-policy",
+        type=str,
+        default=NaoSupportPolicies.EQUAL_SUPPORT.value,
+        choices=NaoSupportPolicies.values(),
+        help="Heuristic Nao support policy to use when --nao-controller heuristic (default: %(default)s)",
+    )
     return parser.parse_args()
 
 
@@ -84,6 +99,17 @@ def load_trained_model(model_path: str, env):
 
 def get_base_env(env):
     return env.unwrapped
+
+
+def heuristic_support_policy_to_action(policy, state) -> int:
+    policy.update_support(state)
+    if policy.support_player == Players.HUMAN:
+        return 0
+    if policy.support_player == Players.SHUTTER:
+        return 1
+    if policy.support_player == Players.NAO:
+        return 2
+    raise ValueError(f"Unsupported heuristic support target: {policy.support_player}")
 
 
 def get_evaluation_threshold(args, experiment_dir: str, env) -> float:
@@ -172,7 +198,7 @@ def _normalize_skill_label(raw_label: str) -> str:
     return "unknown"
 
 
-def evaluate_episodes(model, env, num_episodes: int) -> List[Dict[str, float]]:
+def evaluate_episodes(model, env, num_episodes: int, heuristic_policy=None) -> List[Dict[str, float]]:
     episode_metrics: List[Dict[str, float]] = []
     base_env = get_base_env(env)
 
@@ -198,8 +224,13 @@ def evaluate_episodes(model, env, num_episodes: int) -> List[Dict[str, float]]:
 
         while not (terminated or truncated):
             current_frame = base_env.state.time_state.frame
-            action, _state = model.predict(obs, deterministic=True)
-            action_idx = int(action)
+            if heuristic_policy is not None:
+                action_idx = heuristic_support_policy_to_action(heuristic_policy, base_env.state)
+                action_to_env = action_idx
+            else:
+                action, _state = model.predict(obs, deterministic=True)
+                action_idx = int(action)
+                action_to_env = action
             nao_action_counts[action_idx] = nao_action_counts.get(action_idx, 0) + 1
             bucket_idx = min(NUM_TIME_BUCKETS - 1, int((current_frame / max(1, config.game_duration_frames)) * NUM_TIME_BUCKETS))
             nao_action_bucket_counts[bucket_idx][action_idx] += 1
@@ -216,7 +247,7 @@ def evaluate_episodes(model, env, num_episodes: int) -> List[Dict[str, float]]:
             elif selected_player is not None:
                 second_half_counts[selected_player] += 1
 
-            obs, reward, terminated, truncated, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action_to_env)
             state = base_env.state
             score_bucket_snapshots[bucket_idx] = {
                 "human_score_with_nao": state.score_state.scores[Players.HUMAN.value] + state.score_state.scores["NaoForHuman"],
@@ -575,8 +606,14 @@ def main():
     print("Running tests.py with the following arguments:")
     pprint.pprint(args)
 
+    if args.nao_controller == "trained" and not args.manual_model_experiment_name:
+        raise ValueError("--manual-model-experiment-name is required when --nao-controller trained")
+
     output_dir = init_experiment_dir(ANALYSIS_RESULTS_DIR, args, wipe_dir=True)
-    _experiment_dir, model_path = get_manual_model_path(args.manual_model_experiment_name)
+    experiment_dir = None
+    model_path = None
+    if args.manual_model_experiment_name:
+        experiment_dir, model_path = get_manual_model_path(args.manual_model_experiment_name)
 
     env_id = register_env(game_type=GameTypes.COMPETITIVE)
     env = create_env(
@@ -587,7 +624,7 @@ def main():
         render=args.render,
         fixed_framerate=DynamicsConsts.FRAMES_PER_SECOND if args.render else None,
         rules_based_human_policy=True,
-        support_policy=NaoSupportPolicies.EQUAL_SUPPORT,
+        support_policy=NaoSupportPolicies(args.support_policy),
         independent_victory_score_threshold=args.independent_victory_score_threshold,
         shutter_weak_player_flag = args.shutter_weak_player ,
         human_weak_player_flag = args.human_weak_player,
@@ -596,9 +633,15 @@ def main():
         
     )
 
-    model = load_trained_model(model_path=model_path, env=env)
-    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes)
-    threshold = get_evaluation_threshold(args=args, experiment_dir=_experiment_dir, env=env)
+    model = None
+    heuristic_policy = None
+    if args.nao_controller == "trained":
+        model = load_trained_model(model_path=model_path, env=env)
+    else:
+        heuristic_policy = BaseSupportPolicy.instantiate_support_policy(NaoSupportPolicies(args.support_policy))
+
+    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes, heuristic_policy=heuristic_policy)
+    threshold = get_evaluation_threshold(args=args, experiment_dir=experiment_dir or output_dir, env=env)
 
     csv_path = save_episode_metrics_csv(episode_metrics=episode_metrics, output_dir=output_dir)
     plot_paths = save_all_plots(episode_metrics, output_dir, threshold)
