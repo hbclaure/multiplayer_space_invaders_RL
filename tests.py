@@ -112,6 +112,10 @@ def heuristic_support_policy_to_action(policy, state) -> int:
     raise ValueError(f"Unsupported heuristic support target: {policy.support_player}")
 
 
+def instantiate_heuristic_policy(support_policy: NaoSupportPolicies):
+    return BaseSupportPolicy.instantiate_support_policy(support_policy)
+
+
 def get_evaluation_threshold(args, experiment_dir: str, env) -> float:
     if args.independent_victory_score_threshold is not None:
         return float(args.independent_victory_score_threshold)
@@ -198,12 +202,13 @@ def _normalize_skill_label(raw_label: str) -> str:
     return "unknown"
 
 
-def evaluate_episodes(model, env, num_episodes: int, heuristic_policy=None) -> List[Dict[str, float]]:
+def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoSupportPolicies = None) -> List[Dict[str, float]]:
     episode_metrics: List[Dict[str, float]] = []
     base_env = get_base_env(env)
 
     for episode_idx in tqdm(range(num_episodes), desc="Evaluating episodes", unit="episode"):
         obs, info = env.reset()
+        heuristic_policy = instantiate_heuristic_policy(heuristic_policy_type) if heuristic_policy_type is not None else None
         config = base_env.config
         human_skill_label = _normalize_skill_label(getattr(base_env, "human_playerSkill_description", "unknown"))
         shutter_skill_label = _normalize_skill_label(getattr(base_env, "shutter_playerSkill_description", "unknown"))
@@ -634,13 +639,13 @@ def main():
     )
 
     model = None
-    heuristic_policy = None
+    heuristic_policy_type = None
     if args.nao_controller == "trained":
         model = load_trained_model(model_path=model_path, env=env)
     else:
-        heuristic_policy = BaseSupportPolicy.instantiate_support_policy(NaoSupportPolicies(args.support_policy))
+        heuristic_policy_type = NaoSupportPolicies(args.support_policy)
 
-    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes, heuristic_policy=heuristic_policy)
+    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes, heuristic_policy_type=heuristic_policy_type)
     threshold = get_evaluation_threshold(args=args, experiment_dir=experiment_dir or output_dir, env=env)
 
     csv_path = save_episode_metrics_csv(episode_metrics=episode_metrics, output_dir=output_dir)
