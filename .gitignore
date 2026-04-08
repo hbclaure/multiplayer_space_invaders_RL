@@ -5,3 +5,11 @@ __pycache__/
 
 # Virtualenv used for experiments
 venv_fairness/
+
+# Generated experiment and analysis outputs
+experiments/
+analysis_results/
+analysis_results/behavior_cloning_splits/
+
+# Generated screenshots
+assets/screenshots/

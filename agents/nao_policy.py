@@ -48,7 +48,7 @@ class NaoPolicy:
                  nao_relative_speed, 
                  frequency_bound_frames, 
                  mode,
-                 support_policy 
+                 #support_policy 
                  ):
         
         self.initial_nao_position_y = initial_nao_position_y
@@ -62,35 +62,35 @@ class NaoPolicy:
         self.frequency_bound_frames = frequency_bound_frames
         self.mode = mode # 'powerUp' or 'shooting'
 
-        # Instantiate Support Policy
-        if support_policy in [
-            NaoSupportPolicies.EQUAL_SUPPORT,
-            NaoSupportPolicies.TIMED_EQUAL_SUPPORT,
-            NaoSupportPolicies.PARTIAL_SUPPORT_HUMAN,
-        ]:
-            raise ValueError(f"Support policy {support_policy} is deprecated, since it doesn't respond to dynamic state which can be loaded partway through a trajectory.")
-        elif support_policy == NaoSupportPolicies.HUMAN_ONLY:
-            self.support_policy = OnlyHuman()
-        elif support_policy == NaoSupportPolicies.SHUTTER_ONLY:
-            self.support_policy = OnlyShutter()
-        elif support_policy == NaoSupportPolicies.EQUALIZE_SCORES:
-            self.support_policy = EqualizeScores()
-        elif support_policy == NaoSupportPolicies.EQUALIZE_SUPPORT_HISTORY:
-            self.support_policy = EqualizeSupportHistory()
-        elif support_policy == NaoSupportPolicies.EQUALIZE_SUPPORT_HISTORY_EVEN:
-            self.support_policy = EqualizeSupportHistoryEven()
-        elif support_policy == NaoSupportPolicies.IDLE:
-            self.support_policy = IdleSupport()
-        elif support_policy == NaoSupportPolicies.EQUALIZE_SCORES_NEUTRAL:
-            self.support_policy = EqualizeScoresNeutral()
-        elif support_policy == NaoSupportPolicies.BIASED_SUPPORT_LEFT:
-            self.support_policy = BiasedSupportPolicyLeft()
-        elif support_policy == NaoSupportPolicies.BIASED_SUPPORT_RIGHT:
-            self.support_policy = BiasedSupportPolicyRight()
-        # TODO: narrowyly support either player winning? keeping score above threshold rather than within like equalize support
+        # # Instantiate Support Policy
+        # if support_policy in [
+        #     NaoSupportPolicies.EQUAL_SUPPORT,
+        #     NaoSupportPolicies.TIMED_EQUAL_SUPPORT,
+        #     NaoSupportPolicies.PARTIAL_SUPPORT_HUMAN,
+        # ]:
+        #     raise ValueError(f"Support policy {support_policy} is deprecated, since it doesn't respond to dynamic state which can be loaded partway through a trajectory.")
+        # elif support_policy == NaoSupportPolicies.HUMAN_ONLY:
+        #     self.support_policy = OnlyHuman()
+        # elif support_policy == NaoSupportPolicies.SHUTTER_ONLY:
+        #     self.support_policy = OnlyShutter()
+        # elif support_policy == NaoSupportPolicies.EQUALIZE_SCORES:
+        #     self.support_policy = EqualizeScores()
+        # elif support_policy == NaoSupportPolicies.EQUALIZE_SUPPORT_HISTORY:
+        #     self.support_policy = EqualizeSupportHistory()
+        # elif support_policy == NaoSupportPolicies.EQUALIZE_SUPPORT_HISTORY_EVEN:
+        #     self.support_policy = EqualizeSupportHistoryEven()
+        # elif support_policy == NaoSupportPolicies.IDLE:
+        #     self.support_policy = IdleSupport()
+        # elif support_policy == NaoSupportPolicies.EQUALIZE_SCORES_NEUTRAL:
+        #     self.support_policy = EqualizeScoresNeutral()
+        # elif support_policy == NaoSupportPolicies.BIASED_SUPPORT_LEFT:
+        #     self.support_policy = BiasedSupportPolicyLeft()
+        # elif support_policy == NaoSupportPolicies.BIASED_SUPPORT_RIGHT:
+        #     self.support_policy = BiasedSupportPolicyRight()
+        # # TODO: narrowyly support either player winning? keeping score above threshold rather than within like equalize support
         
-        else:
-            raise Exception(f"An appropriate Nao policy has not been defined. Choose between {list(NaoSupportPolicies)}.")
+        # else:
+        #     raise Exception(f"An appropriate Nao policy has not been defined. Choose between {list(NaoSupportPolicies)}.")
 
     def find_nearest_bullet(self, bullets_to_search, nao_position_x):
         
@@ -106,15 +106,15 @@ class NaoPolicy:
         return nearest_bullet
 
     #TODO: implement a both mode
-    def nao_policy(self, state: 'SpaceInvadersState', images=None):
+    def nao_policy(self, state: 'SpaceInvadersState', support_target ,images=None):
         left = False
         right = False
         shoot = False
         
         nao_x = state.players_state.nao_position_x
-        previous_support_player = self.support_policy.support_player
-        self.support_policy.update_support(state)
-        support_player = self.support_policy.support_player
+        #previous_support_player = self.support_policy.support_player
+        #self.support_policy.update_support(state)
+        support_player = support_target#self.support_policy.support_player
         agent_powerup = {"Shutter": False, "Human": False}
         offset = .005
 
@@ -220,8 +220,9 @@ class NaoPolicy:
 
             # Update support using the selected support policy
             # NOTE: support_policy.support is deprecated in favor of support_policy.support_player
-            self.support_policy.update_support(state)
-            support_player = self.support_policy.support_player
+            # self.support_policy.update_support(state)
+            # support_player = self.support_policy.support_player
+            support_player = support_target
 
             # player_avg_frequency = self.frequency_bound
             # if average_shot_frequency['Human']:

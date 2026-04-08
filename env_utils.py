@@ -359,6 +359,10 @@ class BulletState(StrictDataclass):
     small_distance_to_bullets: List[float] = None
     bullet_threat_binary: List[bool] = None
     frames_until_collision: List[float] = None
+    shutter_distance_to_bullets: List[float] = None
+    shutter_small_distance_to_bullets: List[float] = None
+    shutter_bullet_threat_binary: List[bool] = None
+    shutter_frames_until_collision: List[float] = None
 
     def _replace_none_with_nan(self, array):
         return np.where(array == None, np.nan, array) 
@@ -721,7 +725,11 @@ class SpaceInvadersState:
             human_distance_to_bullets=[0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE * StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN,
             small_distance_to_bullets=[0]* StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE,
             bullet_threat_binary=[0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE,
-            frames_until_collision=[float(InitialStateConsts.FRAMES_UNTIL_BULLET_COLLISION)] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+            frames_until_collision=[float(InitialStateConsts.FRAMES_UNTIL_BULLET_COLLISION)] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE,
+            shutter_distance_to_bullets=[0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE * StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN,
+            shutter_small_distance_to_bullets=[0] * StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE,
+            shutter_bullet_threat_binary=[0] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE,
+            shutter_frames_until_collision=[float(InitialStateConsts.FRAMES_UNTIL_BULLET_COLLISION)] * StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE,
         )
         self.score_state = ScoreState(
             scores={'Human': 0, 'Shutter': 0, 'Nao': 0, 'NaoForHuman': 0, 'NaoForShutter': 0},
@@ -847,7 +855,7 @@ class SpaceInvadersState:
             observation += active_enemies_start_column
 
             # check if the observation is within the expected range
-            observation = np.array(observation)
+            observation = np.asarray(observation, dtype=ObservationConsts.DATA_TYPE)
             if np.any((observation < ObservationConsts.MIN_FEATURE_VALUE) | (observation > ObservationConsts.MAX_FEATURE_VALUE)):
                 # Find indices where observation is less than -1 or greater than 1
                 out_of_bounds_indices = np.where((observation < -1) | (observation > 1))[0]
@@ -856,13 +864,15 @@ class SpaceInvadersState:
             
             return observation
 
-        #Position of the human ship: the leftmost, and rightmost, edge of the human sprite
+        # Position of the human ship: center, left edge, and right edge.
         observation = [self.players_state.human_position_x]
         observation += [self.players_state.human_position_x - (DynamicsConsts.SHIP_WIDTH / 2)]  # Left edge
         observation += [self.players_state.human_position_x + (DynamicsConsts.SHIP_WIDTH / 2)]  # Right edge
-        #Shutter's position
+        # Position of the shutter ship: center, left edge, and right edge.
         observation += [self.players_state.shutter_position_x]
-        #Nao's Position
+        observation += [self.players_state.shutter_position_x - (DynamicsConsts.SHIP_WIDTH / 2)]  # Left edge
+        observation += [self.players_state.shutter_position_x + (DynamicsConsts.SHIP_WIDTH / 2)]  # Right edge
+        # Nao's position
         observation += [self.players_state.nao_position_x]
 
         # Player active statuses
@@ -886,15 +896,19 @@ class SpaceInvadersState:
         #Enemy bullets
         flattened_enemy_bullets = self.bullet_state.bullet_y_positions.flatten(order='F')#Enemy bullets sorted by column
         observation += list(flattened_enemy_bullets)
-        #Human distance to bullets
+        # Human distance to bullets
         observation += self.bullet_state.small_distance_to_bullets
+        # Shutter distance to bullets
+        observation += self.bullet_state.shutter_small_distance_to_bullets
 
-        #Time in the game, by frame
+        # Time in the game, by frame
         observation += [(self.time_state.frame/max_num_frames)]
 
-        #Check for bullet threats to the human spaceship and update the bullet_threat_binary and time_until collision
+        # Bullet threats and time-to-collision for both Human and Shutter
         observation += list(np.array(self.bullet_state.frames_until_collision)/max_num_frames)
         observation += list(self.bullet_state.bullet_threat_binary)
+        observation += list(np.array(self.bullet_state.shutter_frames_until_collision)/max_num_frames)
+        observation += list(self.bullet_state.shutter_bullet_threat_binary)
         
         #scores- normalized
         # TODO: what's 3500
@@ -919,7 +933,7 @@ class SpaceInvadersState:
             observation.append(last_shot_frame)
 
         # check if the observation is within the expected range
-        observation = np.array(observation)
+        observation = np.asarray(observation, dtype=ObservationConsts.DATA_TYPE)
         if np.any((observation < ObservationConsts.MIN_FEATURE_VALUE) | (observation > ObservationConsts.MAX_FEATURE_VALUE)):
             # Find indices where observation is less than -1 or greater than 1
             out_of_bounds_indices = np.where((observation < -1) | (observation > 1))[0]
@@ -969,17 +983,20 @@ class SpaceInvadersState:
         # NOTE: index comments are out of date
         HUMAN_SHIP_START = 0
         SHUTTER_SHIP_START = HUMAN_SHIP_START + 3
-        NAO_SHIP_START = SHUTTER_SHIP_START + 1
+        NAO_SHIP_START = SHUTTER_SHIP_START + 3
         PLAYERS_ACTIVE_START = NAO_SHIP_START + 1
-        ENEMIES_ACTIVE_START  = PLAYERS_ACTIVE_START + 3 #  5
-        PLAYER_BULLETS_START = ENEMIES_ACTIVE_START + StateConsts.NUM_ENEMIES # 55
-        ENEMY_BULLETS_START = PLAYER_BULLETS_START + StateConsts.MAX_NUM_PLAYER_BULLETS*ObservationConsts.NUM_PLAYER_BULLET_FEATURES # 75
-        BULLET_DISTANCE_START = ENEMY_BULLETS_START + StateConsts.NUM_ENEMY_COLUMNS*StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN # 95
-        FRAME_START = BULLET_DISTANCE_START + StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE # 98
-        TIME_TO_COLLISION_START = FRAME_START + 1 # 99
-        BULLET_THREAT_START = TIME_TO_COLLISION_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE # 104
-        SCORES_START = BULLET_THREAT_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE # 109
-        SHOT_FRAME_START = SCORES_START + 5 # 111
+        ENEMIES_ACTIVE_START  = PLAYERS_ACTIVE_START + 3
+        PLAYER_BULLETS_START = ENEMIES_ACTIVE_START + StateConsts.NUM_ENEMIES
+        ENEMY_BULLETS_START = PLAYER_BULLETS_START + StateConsts.MAX_NUM_PLAYER_BULLETS*ObservationConsts.NUM_PLAYER_BULLET_FEATURES
+        HUMAN_BULLET_DISTANCE_START = ENEMY_BULLETS_START + StateConsts.NUM_ENEMY_COLUMNS*StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN
+        SHUTTER_BULLET_DISTANCE_START = HUMAN_BULLET_DISTANCE_START + StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE
+        FRAME_START = SHUTTER_BULLET_DISTANCE_START + StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE
+        HUMAN_TIME_TO_COLLISION_START = FRAME_START + 1
+        HUMAN_BULLET_THREAT_START = HUMAN_TIME_TO_COLLISION_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+        SHUTTER_TIME_TO_COLLISION_START = HUMAN_BULLET_THREAT_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+        SHUTTER_BULLET_THREAT_START = SHUTTER_TIME_TO_COLLISION_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+        SCORES_START = SHUTTER_BULLET_THREAT_START + StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE
+        SHOT_FRAME_START = SCORES_START + 5
 
         state.players_state.human_position_x = observation[HUMAN_SHIP_START]
         state.players_state.shutter_position_x = observation[SHUTTER_SHIP_START]
@@ -1001,12 +1018,15 @@ class SpaceInvadersState:
         enemy_bullets_flattened = observation[ENEMY_BULLETS_START:ENEMY_BULLETS_START+StateConsts.NUM_ENEMY_COLUMNS*StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN]
         state.bullet_state.bullet_y_positions = enemy_bullets_flattened.reshape((StateConsts.NUM_ENEMY_COLUMNS, StateConsts.MAX_NUM_ENEMY_BULLETS_PER_COLUMN), order='F')
 
-        state.bullet_state.small_distance_to_bullets = list(observation[BULLET_DISTANCE_START:BULLET_DISTANCE_START+StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE])
+        state.bullet_state.small_distance_to_bullets = list(observation[HUMAN_BULLET_DISTANCE_START:HUMAN_BULLET_DISTANCE_START+StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE])
+        state.bullet_state.shutter_small_distance_to_bullets = list(observation[SHUTTER_BULLET_DISTANCE_START:SHUTTER_BULLET_DISTANCE_START+StateConsts.PRACTICAL_MAX_NUM_ENEMY_BULLETS_PER_SIDE])
 
         state.time_state.frame = round(observation[FRAME_START]*max_num_frames)
 
-        state.bullet_state.frames_until_collision = list(observation[TIME_TO_COLLISION_START:TIME_TO_COLLISION_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE]*max_num_frames)
-        state.bullet_state.bullet_threat_binary = list(observation[BULLET_THREAT_START:BULLET_THREAT_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE])
+        state.bullet_state.frames_until_collision = list(observation[HUMAN_TIME_TO_COLLISION_START:HUMAN_TIME_TO_COLLISION_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE]*max_num_frames)
+        state.bullet_state.bullet_threat_binary = list(observation[HUMAN_BULLET_THREAT_START:HUMAN_BULLET_THREAT_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE])
+        state.bullet_state.shutter_frames_until_collision = list(observation[SHUTTER_TIME_TO_COLLISION_START:SHUTTER_TIME_TO_COLLISION_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE]*max_num_frames)
+        state.bullet_state.shutter_bullet_threat_binary = list(observation[SHUTTER_BULLET_THREAT_START:SHUTTER_BULLET_THREAT_START+StateConsts.NUM_ENEMY_COLUMNS_PER_SIDE])
 
         # NOTE: observation doesn't include Nao's score
         state.score_state.scores = {"Human": observation[SCORES_START]*3500, "Shutter": observation[SCORES_START+1]*3500, "Nao": observation[SCORES_START+2]*3500,
@@ -1269,6 +1289,9 @@ class SpaceInvadersConfig(StrictDataclass):
     game_duration_frames: int
     independent_victory_score_threshold: int
     game_type: GameTypes
+    human_weak_player_flag: bool
+    shutter_weak_player_flag: bool
+    adjust_player_shooting: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -1294,7 +1317,6 @@ class SpaceInvadersConfig(StrictDataclass):
             raise ValueError(f"game_duration_frames must be a positive integer, got {self.game_duration_frames}")
         if self.independent_victory_score_threshold is not None and self.independent_victory_score_threshold <= 0:
             raise ValueError(f"independent_victory_score_threshold must be a positive integer, got {self.independent_victory_score_threshold}")
-
         if self.minimal_complexity_env:
             if self.reward_model != RewardTypes.MINIMAL_COMPLEXITY:
                 raise ValueError(f"SpaceInvadersConfig: Minimal complexity environment requires minimal complexity reward model. Use reward_model={RewardTypes.MINIMAL_COMPLEXITY}")

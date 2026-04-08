@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import pprint
+import re
 from typing import Dict, List
 
 import matplotlib.pyplot as plt
@@ -15,7 +16,7 @@ from consts import ActionSpaces, DynamicsConsts, GameTypes, NaoSupportPolicies, 
 from deep_sarsa import DeepSarsa
 from path_consts import ANALYSIS_RESULTS_DIR, get_manual_model_path
 from utils import create_env, init_experiment_dir, register_env
-
+import torch
 
 NAO_ACTION_LABELS = {
     0: "Support Human",
@@ -116,6 +117,10 @@ def instantiate_heuristic_policy(support_policy: NaoSupportPolicies):
     return BaseSupportPolicy.instantiate_support_policy(support_policy)
 
 
+def _sanitize_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_")
+
+
 def get_evaluation_threshold(args, experiment_dir: str, env) -> float:
     if args.independent_victory_score_threshold is not None:
         return float(args.independent_victory_score_threshold)
@@ -202,12 +207,38 @@ def _normalize_skill_label(raw_label: str) -> str:
     return "unknown"
 
 
-def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoSupportPolicies = None) -> List[Dict[str, float]]:
+
+
+
+
+
+
+
+def evaluate_episodes(output_dir, model, env, num_episodes: int, heuristic_policy_type: NaoSupportPolicies = None) -> List[Dict[str, float]]:
     episode_metrics: List[Dict[str, float]] = []
     base_env = get_base_env(env)
+    metadata = {
+
+        }
+    behavior_cloning_data = {
+            "episode": [], 
+            "frame_number": [],
+        
+            "observations": [],
+            "features": [],
+            "actions": [],
+            "dones":[],
+            "metadata": {
+                "human_skill_label":[],
+                "shutter_skill_label":[],
+                "human_shooting_threshold":[],
+                "shutter_shooting_threshold":[],
+                }
+        }
 
     for episode_idx in tqdm(range(num_episodes), desc="Evaluating episodes", unit="episode"):
         obs, info = env.reset()
+
         heuristic_policy = instantiate_heuristic_policy(heuristic_policy_type) if heuristic_policy_type is not None else None
         config = base_env.config
         human_skill_label = _normalize_skill_label(getattr(base_env, "human_playerSkill_description", "unknown"))
@@ -218,20 +249,28 @@ def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoS
         first_half_counts = {Players.HUMAN: 0, Players.SHUTTER: 0}
         second_half_counts = {Players.HUMAN: 0, Players.SHUTTER: 0}
         nao_action_counts = {0: 0, 1: 0, 2: 0}
+        nao_action_list = []
         nao_action_bucket_counts = [{0: 0, 1: 0, 2: 0} for _ in range(NUM_TIME_BUCKETS)]
         score_bucket_snapshots = [
             {"human_score_with_nao": 0.0, "shutter_score_with_nao": 0.0}
             for _ in range(NUM_TIME_BUCKETS)
         ]
 
+
+
         terminated = False
         truncated = False
 
+
+
+
         while not (terminated or truncated):
             current_frame = base_env.state.time_state.frame
+            obs_before_action = obs
             if heuristic_policy is not None:
                 action_idx = heuristic_support_policy_to_action(heuristic_policy, base_env.state)
                 action_to_env = action_idx
+                nao_action_list.append(action_idx)
             else:
                 action, _state = model.predict(obs, deterministic=True)
                 action_idx = int(action)
@@ -253,6 +292,19 @@ def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoS
                 second_half_counts[selected_player] += 1
 
             obs, reward, terminated, truncated, info = env.step(action_to_env)
+            behavior_cloning_data["episode"].append(episode_idx)
+            behavior_cloning_data["frame_number"].append(current_frame)
+            behavior_cloning_data["actions"].append(action_idx)
+            behavior_cloning_data["dones"].append(terminated or truncated)
+            behavior_cloning_data["observations"].append(obs_before_action)
+
+            behavior_cloning_data["metadata"]["human_skill_label"].append(human_skill_label)
+            behavior_cloning_data["metadata"]["shutter_skill_label"].append(shutter_skill_label)
+            behavior_cloning_data["metadata"]["human_shooting_threshold"].append(human_shooting_threshold)
+            behavior_cloning_data["metadata"]["shutter_shooting_threshold"].append(shutter_shooting_threshold)
+
+
+
             state = base_env.state
             score_bucket_snapshots[bucket_idx] = {
                 "human_score_with_nao": state.score_state.scores[Players.HUMAN.value] + state.score_state.scores["NaoForHuman"],
@@ -267,6 +319,7 @@ def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoS
                 last_snapshot = snapshot.copy()
 
         final_state = base_env.get_state(copy_state=True)
+
         episode_metrics.append(
             _finalize_episode_metrics(
                 final_state=final_state,
@@ -283,6 +336,8 @@ def evaluate_episodes(model, env, num_episodes: int, heuristic_policy_type: NaoS
                 shutter_shooting_threshold=shutter_shooting_threshold,
             )
         )
+    bc_data_path = os.path.join(output_dir, "behavior_cloning_data.pt")
+    torch.save(behavior_cloning_data, bc_data_path)
 
     return episode_metrics
 
@@ -614,7 +669,19 @@ def main():
     if args.nao_controller == "trained" and not args.manual_model_experiment_name:
         raise ValueError("--manual-model-experiment-name is required when --nao-controller trained")
 
-    output_dir = init_experiment_dir(ANALYSIS_RESULTS_DIR, args, wipe_dir=True)
+    if args.nao_controller == "heuristic":
+        policy_name = _sanitize_name(args.support_policy)
+        run_name = _sanitize_name(args.exp_name) if args.exp_name else "collect_data"
+        base_output_dir = os.path.join(ANALYSIS_RESULTS_DIR, "behavior_cloning", policy_name)
+        os.makedirs(base_output_dir, exist_ok=True)
+        output_dir = os.path.join(base_output_dir, run_name)
+        if os.path.exists(output_dir):
+            raise FileExistsError(f"Output directory already exists: {output_dir}")
+        os.makedirs(output_dir, exist_ok=False)
+        with open(os.path.join(output_dir, "args.json"), "w") as f:
+            json.dump(vars(args), f, indent=2, sort_keys=True)
+    else:
+        output_dir = init_experiment_dir(ANALYSIS_RESULTS_DIR, args, wipe_dir=True)
     experiment_dir = None
     model_path = None
     if args.manual_model_experiment_name:
@@ -645,7 +712,7 @@ def main():
     else:
         heuristic_policy_type = NaoSupportPolicies(args.support_policy)
 
-    episode_metrics = evaluate_episodes(model=model, env=env, num_episodes=args.num_episodes, heuristic_policy_type=heuristic_policy_type)
+    episode_metrics = evaluate_episodes(output_dir=output_dir,model=model, env=env, num_episodes=args.num_episodes, heuristic_policy_type=heuristic_policy_type)
     threshold = get_evaluation_threshold(args=args, experiment_dir=experiment_dir or output_dir, env=env)
 
     csv_path = save_episode_metrics_csv(episode_metrics=episode_metrics, output_dir=output_dir)

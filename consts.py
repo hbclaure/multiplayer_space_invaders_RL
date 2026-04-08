@@ -3,6 +3,7 @@ import os
 from enum import Enum
 from math import ceil
 from units_utils import seconds_to_frames
+from scipy.stats import truncnorm
 
 class RenderConsts:
 
@@ -60,7 +61,7 @@ class ObservationConsts:
     NO_FRAMES_UNTIL_BULLET_COLLISION = -1
     NO_SHOOTER = -1
 
-    DIM = 137#130
+    DIM = 159
     SHAPE = (DIM,)
     MINIMAL_COMPLEXITY_DIM = 9
     MINIMAL_COMPLEXITY_SHAPE = (MINIMAL_COMPLEXITY_DIM,)
@@ -87,9 +88,38 @@ class RewardConsts:
 
     LEADING_SCORE_THRESHOLD = 50
 
+
+class PlayerPerformanceConsts:
+    #threshold that has to be surpassed
+    SINGLE_SHOOTING_THRESHOLD = .25 #.01 #np.random.normal(mu, sigma, num_samples)  #.01 For low skill, range goes from .01(about 330 ish for score) to .005 (290), .001(90 points)
+    # .05 gives around 650 
+    #.09 gives about 700
+    #.15 gives about 750
+    #.25 gives about 800
+    HUMAN_SHOOTING_THRESHOLD = .25
+    SHUTTER_SHOOTING_THRESHOLD = .25
+
+
+
+
+    # mu = 0.01
+    # sigma = 0.003
+    # a = 0.001
+
+    # a_std = (a - mu) / sigma
+
+    # SHOOTING_THRESHOLD = truncnorm.rvs(a_std, np.inf, loc=mu, scale=sigma)
+
 class ScoreConsts:
     BONUS_FOR_HITTING_ENEMY = 10
     #INDEPENDENT_VICTORY_THRESHOLD = None
+
+class FairnessRewardConsts:
+    TEAM_WEIGHT = 1.0
+    OUTCOME_WEIGHT = 1.0
+    TIME_WEIGHT = 1.0
+    THRESHOLD_WEIGHT = .1
+    EPSILON = 1e-8
 
 # NOTE: constants prefixed with _ are configured in their units, but only used in code once converted to other units
 class DynamicsConsts:
@@ -330,6 +360,7 @@ class GameTypes(EnhancedEnum):
 class RewardTypes(EnhancedEnum):
     FULL = "full"
     MINIMAL_COMPLEXITY = "minimalComplexity"
+    NAO_FAIRNESS = "naoFairness"
 
 class RenderModes(EnhancedEnum):
     RGB_ARRAY = "rgb_array"
@@ -364,11 +395,19 @@ class ActionSpaces(EnhancedEnum):
     SHUTTER_ONLY = "ShutterOnly"
     NAO_ONLY = "NaoOnly"
     JOINT_AGENT = "JointAgent"
+    
 
 
 class ValueFunctionType(EnhancedEnum):
     Q_FUNCTION = "QFunction"
     MC_ROLLOUT = "MCRollout"
+
+class PlayerShootingAdjustment(EnhancedEnum):
+    #Choose which player to adjust the shooting level of
+    HUMAN= 'human'
+    SHUTTER = 'shutter'
+    BOTH = 'both'
+
 
 def action_space_to_player(action_space):
     if action_space == ActionSpaces.HUMAN_ONLY:
@@ -381,6 +420,23 @@ def action_space_to_player(action_space):
         raise NotImplementedError("Joint agent not supported")
     else:
         raise ValueError(f"Invalid action space: {action_space}")
+
+# def sample():
+#     if np.random.rand() < 0.5:
+#         return np.random.normal(0.01, 0.003), "low_skill_player"
+#     else:
+#         return np.random.normal(0.15, 0.027), "high_skill_player" 
+
+def sample_truncated_normal(mu, sigma, low=0.0, high=1.0):
+    a = (low - mu) / sigma
+    b = (high - mu) / sigma
+    return truncnorm.rvs(a, b, loc=mu, scale=sigma)
+
+def sample():
+    if np.random.rand() < 0.5:
+        return sample_truncated_normal(0.01, 0.003), "low_skill_player"
+    else:
+        return sample_truncated_normal(0.15, 0.027), "high_skill_player"
     
 class InteractiveModes(EnhancedEnum):
     NONE = "none"

@@ -1,5 +1,8 @@
-from deep_sarsa import DeepSarsa
+from stable_baselines3 import DQN
 
+from deep_sarsa import DeepSarsa
+import argparse
+import pprint
 from consts import (
     ActionSpaces,
     DynamicsConsts,
@@ -10,25 +13,59 @@ from consts import (
 )
 from utils import create_env, register_env
 
+def parse_args():
+    # Command-line arguments
+    parser = argparse.ArgumentParser(description="Reinforcement Learning Model testing")
+    parser.add_argument(
+        "--human-weak-player",
+        action="store_true",
+        help="Whether the human agent is a weak player (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--shutter-weak-player",
+        action="store_true",
+        help="Whether the shutter agent is a weak player (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--adjust-player-shooting",
+        default=None,
+        choices=PlayerShootingAdjustment.values(),
+        help="Adjusting the shooting of a player, human, shutter, or both(default: %(default)s)",
+    )
+    return parser.parse_args()
 
-MODEL_PATH = "experiments/baseline_run_2/models/env=competitive__support=biasedSupportLeft__reward=full.pt"
+MODEL_PATH = "experiments/testing_feature/models/env=competitive__support=equalSupport__reward=naoFairness.pt"
 NUM_EPISODES = 3
 
 
+def load_trained_model(model_path, env):
+    try:
+        return DQN.load(model_path, env=env)
+    except Exception:
+        return DeepSarsa.load(model_path, env=env)
+
+
 def main():
+    args = parse_args()
+    print("Running train.py with the following arguments:")
+    pprint.pprint(args)
     env_id = register_env(game_type=GameTypes.COMPETITIVE)
     env = create_env(
         env_id=env_id,
         multiprocessing=False,
-        action_space=ActionSpaces.HUMAN_ONLY,
-        reward_model=RewardTypes.FULL,
+        action_space=ActionSpaces.NAO_ONLY,
+        reward_model=RewardTypes.NAO_FAIRNESS,
         render_mode=RenderModes.DISPLAY_WINDOW.value,
-        support_policy=NaoSupportPolicies.BIASED_SUPPORT_LEFT,
+        support_policy=NaoSupportPolicies.EQUAL_SUPPORT,
         render=True,
         fixed_framerate=DynamicsConsts.FRAMES_PER_SECOND,
+        shutter_weak_player_flag = args.shutter_weak_player ,
+        human_weak_player_flag = args.human_weak_player,
+        adjust_player_shooting = args.adjust_player_shooting
+
     )
 
-    model = DeepSarsa.load(MODEL_PATH, env=env)
+    model = load_trained_model(MODEL_PATH, env=env)
 
     for episode in range(NUM_EPISODES):
         obs, info = env.reset()
