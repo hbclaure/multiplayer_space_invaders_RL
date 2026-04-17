@@ -3,6 +3,7 @@ import os
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
+from tqdm import tqdm
 
 
 
@@ -48,12 +49,12 @@ saved_best_models =None
 print_freq = 10 
 
 best_eval_loss = float("inf")
-for epoch in range(100):
+for epoch in tqdm(range(100), desc="Training epochs", unit="epoch"):
     #train
     model.train()
     # Forward pass
 
-    for x_batch, y_batch in train_loader:
+    for x_batch, y_batch in tqdm(train_loader, desc=f"Epoch {epoch+1}", unit="batch", leave=False):
 
         output = model(x_batch)
         loss = criterion(output, y_batch)
@@ -101,7 +102,6 @@ with torch.no_grad():
 
 
     print(f'Final Loss : {test_loss.item():.4f} | accuracy = {test_acc:.4f}')
-
 
 
 
